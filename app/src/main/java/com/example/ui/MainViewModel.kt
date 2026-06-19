@@ -532,6 +532,48 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun reorderActivePages(updatedPages: List<PageDef>) {
+        val reindexedPages = updatedPages.mapIndexed { index, pageDef ->
+            pageDef.copy(pageNumber = index + 1)
+        }
+        _uiState.update {
+            val currentContent = it.activeDocumentContent
+            val newActiveField = if (reindexedPages.none { page -> page.id == it.activePageId }) {
+                reindexedPages.firstOrNull()?.id ?: ""
+            } else {
+                it.activePageId
+            }
+            it.copy(
+                activeDocumentContent = currentContent.copy(pages = reindexedPages),
+                activePageId = newActiveField
+            )
+        }
+    }
+
+    fun removePageFromActiveDocument(pageId: String) {
+        val currentContent = _uiState.value.activeDocumentContent
+        if (currentContent.pages.size <= 1) {
+            triggerFeedback("A PDF must contain at least 1 page!")
+            return
+        }
+        val filteredPages = currentContent.pages.filterNot { it.id == pageId }
+        val reindexedPages = filteredPages.mapIndexed { index, pageDef ->
+            pageDef.copy(pageNumber = index + 1)
+        }
+        _uiState.update {
+            val newActiveField = if (it.activePageId == pageId) {
+                reindexedPages.first().id
+            } else {
+                it.activePageId
+            }
+            it.copy(
+                activeDocumentContent = currentContent.copy(pages = reindexedPages),
+                activePageId = newActiveField
+            )
+        }
+        triggerFeedback("Page removed.")
+    }
+
     fun deleteActivePage() {
         val currentContent = _uiState.value.activeDocumentContent
         val activePageId = _uiState.value.activePageId
@@ -586,6 +628,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun renameDocument(doc: Document, newTitle: String) {
+        viewModelScope.launch {
+            if (newTitle.isNotBlank()) {
+                val updated = doc.copy(title = newTitle.trim())
+                repo.updateDocument(updated)
+                triggerFeedback("Document renamed successfully!")
+            }
+        }
+    }
+
     // --- AUTOMATIC BACKGROUND DETECTION & REMOVAL FOR IMAGE SIGNATURES ---
     fun removeSignatureBackground(src: Bitmap): Bitmap {
         val width = src.width
@@ -604,17 +656,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             // Calculate luminance Y (standard ITU-R formula)
             val luminance = 0.299f * r + 0.587f * g + 0.114f * b
 
-            // White or light background thresholding
-            if (luminance > 175f) {
+            // Smooth adaptive transparency thresholding
+            if (luminance >= 130f) {
                 pixels[i] = android.graphics.Color.TRANSPARENT
+            } else if (luminance > 90f) {
+                // Smooth transition alpha to avoid pixelated jagged edges
+                val alphaFactor = (130f - luminance) / (130f - 90f)
+                val finalAlpha = (alphaFactor * 255).toInt().coerceIn(0, 255)
+                pixels[i] = (finalAlpha shl 24) or (r shl 16) or (g shl 8) or b
             } else {
-                if (luminance > 140f) {
-                    val alphaRatio = (175f - luminance) / (175f - 140f)
-                    val newAlpha = (a * alphaRatio).toInt().coerceIn(0, 255)
-                    pixels[i] = (newAlpha shl 24) or (r shl 16) or (g shl 8) or b
-                } else {
-                    pixels[i] = color
-                }
+                // Pristine ink solid color preservation
+                pixels[i] = (0xff shl 24) or (r shl 16) or (g shl 8) or b
             }
         }
         out.setPixels(pixels, 0, width, 0, 0, width, height)
@@ -1089,23 +1141,88 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun applyFilterToBitmap(bitmap: Bitmap, filterName: String): Bitmap {
+        return when (filterName) {
+            "black_white" -> {
+                val dest = Bitmap.createBitmap(bitmap.width, bitmap.height, bitmap.config ?: Bitmap.Config.ARGB_8888)
+                val canvas = android.graphics.Canvas(dest)
+                val paint = android.graphics.Paint()
+                val cm = android.graphics.ColorMatrix()
+                cm.setSaturation(0f)
+                val scale = 2.0f
+                val translate = -128f * scale + 128f
+                val contrast = android.graphics.ColorMatrix(floatArrayOf(
+                    scale, 0f, 0f, 0f, translate,
+                    0f, scale, 0f, 0f, translate,
+                    0f, 0f, scale, 0f, translate,
+                    0f, 0f, 0f, 1f, 0f
+                ))
+                cm.postConcat(contrast)
+                paint.colorFilter = android.graphics.ColorMatrixColorFilter(cm)
+                canvas.drawBitmap(bitmap, 0f, 0f, paint)
+                dest
+            }
+            "grayscale" -> {
+                val dest = Bitmap.createBitmap(bitmap.width, bitmap.height, bitmap.config ?: Bitmap.Config.ARGB_8888)
+                val canvas = android.graphics.Canvas(dest)
+                val paint = android.graphics.Paint()
+                val cm = android.graphics.ColorMatrix()
+                cm.setSaturation(0f)
+                paint.colorFilter = android.graphics.ColorMatrixColorFilter(cm)
+                canvas.drawBitmap(bitmap, 0f, 0f, paint)
+                dest
+            }
+            "enhance" -> {
+                val dest = Bitmap.createBitmap(bitmap.width, bitmap.height, bitmap.config ?: Bitmap.Config.ARGB_8888)
+                val canvas = android.graphics.Canvas(dest)
+                val paint = android.graphics.Paint()
+                val cm = android.graphics.ColorMatrix()
+                cm.setSaturation(1.4f)
+                val scale = 1.2f
+                val translate = -128f * scale + 128f + 10f
+                val contrast = android.graphics.ColorMatrix(floatArrayOf(
+                    scale, 0f, 0f, 0f, translate,
+                    0f, scale, 0f, 0f, translate,
+                    0f, 0f, scale, 0f, translate,
+                    0f, 0f, 0f, 1f, 0f
+                ))
+                cm.postConcat(contrast)
+                paint.colorFilter = android.graphics.ColorMatrixColorFilter(cm)
+                canvas.drawBitmap(bitmap, 0f, 0f, paint)
+                dest
+            }
+            else -> bitmap
+        }
+    }
+
     fun compileScannedDoc(title: String) {
         viewModelScope.launch {
             val actualTitle = title.ifBlank { "Scan Document ${System.currentTimeMillis() % 1000}" }
-            val paths = _uiState.value.scannerStepPaths
+            val bitmaps = _uiState.value.scannerStepBitmaps
+            val filterType = _uiState.value.scannerFilterType
             
-            if (paths.isEmpty()) {
+            if (bitmaps.isEmpty()) {
                 triggerFeedback("No scanned images captured.")
                 return@launch
             }
 
-            // High performance local mock filters could be written, but keeping real JPEGs is best
-            val documentPages = paths.mapIndexed { index, path ->
+            val appDir = getApplication<Application>().filesDir
+            val scansDir = File(appDir, "scans")
+            if (!scansDir.exists()) scansDir.mkdirs()
+
+            // Map each scanned page to a PageDef, applying the filter to the bitmap and saving it before finalizing
+            val documentPages = bitmaps.mapIndexed { index, bitmap ->
+                val filteredBmp = applyFilterToBitmap(bitmap, filterType)
+                val finalFile = File(scansDir, "scan_finalized_${System.currentTimeMillis()}_$index.jpg")
+                val fos = FileOutputStream(finalFile)
+                filteredBmp.compress(Bitmap.CompressFormat.JPEG, 90, fos)
+                fos.close()
+
                 PageDef(
                     id = UUID.randomUUID().toString(),
                     pageNumber = index + 1,
                     type = "scan",
-                    backgroundScanPath = path,
+                    backgroundScanPath = finalFile.absolutePath,
                     ocrText = "Scanned Page ${index + 1}"
                 )
             }
@@ -1126,7 +1243,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             if (savedDoc != null) {
                 PdfGenerator.buildPdf(getApplication(), savedDoc, docContent, _uiState.value.signatures)
-                triggerFeedback("Scanned document finalized!")
+                // Reset scanner state to clean up
+                _uiState.update {
+                    it.copy(
+                        scannerStepBitmaps = emptyList(),
+                        scannerStepPaths = emptyList(),
+                        scannerFilterType = "original"
+                    )
+                }
+                triggerFeedback("Scanned document finalized with $filterType filter!")
                 navigateTo(Screen.Dashboard)
             }
         }

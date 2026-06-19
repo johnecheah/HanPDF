@@ -33,7 +33,10 @@ data class TextAnnotationDef(
     val outlineColorHex: String = "#000000",
     val hasDoubleUnderline: Boolean = false,
     val isBold: Boolean = false,
-    val alignment: String = "left" // "left", "center", "right"
+    val alignment: String = "left", // "left", "center", "right"
+    val isPowerOf: Boolean = false,
+    val isItalic: Boolean = false,
+    val hasStrikeThrough: Boolean = false
 )
 
 data class SignatureOverlayDef(
