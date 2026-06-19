@@ -1,0 +1,6 @@
+{
+  "name": "HanPDF",
+  "description": "Adobe Acrobat-style manager to create, edit, scan, sign, merge, and run OCR on documents.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
