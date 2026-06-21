@@ -34,7 +34,22 @@ object PdfGenerator {
             val pages = content.pages.ifEmpty { listOf(PageDef("1", 1)) }
 
             for ((index, pageDef) in pages.withIndex()) {
-                val pageInfo = PdfDocument.PageInfo.Builder(widthPoints, heightPoints, index + 1).create()
+                var curW = 595
+                var curH = 842
+
+                if (pageDef.backgroundScanPath != null) {
+                    val file = File(pageDef.backgroundScanPath)
+                    if (file.exists()) {
+                        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                        BitmapFactory.decodeFile(file.absolutePath, options)
+                        if (options.outWidth > 0 && options.outHeight > 0) {
+                            curW = options.outWidth
+                            curH = options.outHeight
+                        }
+                    }
+                }
+
+                val pageInfo = PdfDocument.PageInfo.Builder(curW, curH, index + 1).create()
                 val page = pdfDocument.startPage(pageInfo)
                 val canvas = page.canvas
 
@@ -43,34 +58,44 @@ object PdfGenerator {
                     color = Color.WHITE
                     style = Paint.Style.FILL
                 }
-                canvas.drawRect(0f, 0f, widthPoints.toFloat(), heightPoints.toFloat(), bgPaint)
+                canvas.drawRect(0f, 0f, curW.toFloat(), curH.toFloat(), bgPaint)
 
                 // 1b. Apply page rotation around center
                 if (pageDef.rotationDegrees != 0) {
-                    canvas.rotate(pageDef.rotationDegrees.toFloat(), widthPoints / 2f, heightPoints / 2f)
+                    canvas.rotate(pageDef.rotationDegrees.toFloat(), curW / 2f, curH / 2f)
                 }
 
                 // 2. Draw standard templates if scan background is missing
                 if (pageDef.backgroundScanPath != null) {
                     val file = File(pageDef.backgroundScanPath)
                     if (file.exists()) {
-                        val bitmap = BitmapFactory.decodeFile(file.absolutePath)
-                        if (bitmap != null) {
-                            val rect = RectF(0f, 0f, widthPoints.toFloat(), heightPoints.toFloat())
+                        val originalBmp = BitmapFactory.decodeFile(file.absolutePath)
+                        if (originalBmp != null) {
+                            val bitmap = if (pageDef.filterType != "original") {
+                                val filtered = BitmapFilter.applyFilter(originalBmp, pageDef.filterType)
+                                if (filtered != originalBmp) {
+                                    originalBmp.recycle()
+                                }
+                                filtered
+                            } else {
+                                originalBmp
+                            }
+                            val rect = RectF(0f, 0f, curW.toFloat(), curH.toFloat())
                             canvas.drawBitmap(bitmap, null, rect, Paint(Paint.FILTER_BITMAP_FLAG))
+                            bitmap.recycle()
                         }
                     }
                 } else {
                     // Draw paper template lines
                     when (pageDef.type.lowercase()) {
                         "lined" -> {
-                            drawLinedPaperTemplate(canvas, widthPoints, heightPoints)
+                            drawLinedPaperTemplate(canvas, curW, curH)
                         }
                         "cornell" -> {
-                            drawCornellNotesTemplate(canvas, widthPoints, heightPoints)
+                            drawCornellNotesTemplate(canvas, curW, curH)
                         }
                         "meeting" -> {
-                            drawMeetingMinutesTemplate(canvas, widthPoints, heightPoints)
+                            drawMeetingMinutesTemplate(canvas, curW, curH)
                         }
                     }
                 }
@@ -84,7 +109,7 @@ object PdfGenerator {
                         style = Paint.Style.STROKE
                         strokeCap = Paint.Cap.ROUND
                         strokeJoin = Paint.Join.ROUND
-                        strokeWidth = draw.strokeWidth * (widthPoints / 400f) // scale stroke from UI relative size
+                        strokeWidth = draw.strokeWidth * (curW / 400f) // scale stroke from UI relative size
                         
                         if (draw.isHighlighter) {
                             alpha = 100 // Beautiful transparent highlight
@@ -100,10 +125,10 @@ object PdfGenerator {
 
                     val path = Path()
                     val start = draw.points.first()
-                    path.moveTo(start.x * widthPoints, start.y * heightPoints)
+                    path.moveTo(start.x * curW, start.y * curH)
                     for (i in 1 until draw.points.size) {
                         val pt = draw.points[i]
-                        path.lineTo(pt.x * widthPoints, pt.y * heightPoints)
+                        path.lineTo(pt.x * curW, pt.y * curH)
                     }
                     canvas.drawPath(path, drawPaint)
                 }
@@ -113,13 +138,17 @@ object PdfGenerator {
                     val sizeRatio = if (textDef.isPowerOf) 0.72f else 1.0f
                     val textPaint = Paint().apply {
                         color = Color.parseColor(textDef.colorHex)
-                        textSize = (textDef.fontSize * sizeRatio) * (widthPoints / 400f)
+                        textSize = (textDef.fontSize * sizeRatio) * (curW / 400f)
                         val fontStyle = if (textDef.isBold) {
                             if (textDef.isItalic || textDef.fontName.lowercase() == "cursive") Typeface.BOLD_ITALIC else Typeface.BOLD
                         } else {
                             if (textDef.isItalic || textDef.fontName.lowercase() == "cursive") Typeface.ITALIC else Typeface.NORMAL
                         }
                         val fontTypeface = when (textDef.fontName.lowercase()) {
+                            "times new roman" -> Typeface.create(Typeface.SERIF, fontStyle)
+                            "tahoma" -> Typeface.create("sans-serif-condensed", fontStyle)
+                            "calibri" -> Typeface.create("sans-serif-light", fontStyle)
+                            "arial" -> Typeface.create("sans-serif", fontStyle)
                             "serif" -> Typeface.create(Typeface.SERIF, fontStyle)
                             "monospace" -> Typeface.create(Typeface.MONOSPACE, fontStyle)
                             "cursive" -> Typeface.create("serif", fontStyle)
@@ -135,23 +164,27 @@ object PdfGenerator {
                         isAntiAlias = true
                     }
                     
-                    val textWidth = textPaint.measureText(textDef.text)
-                    val baseRx = textDef.x * widthPoints
-                    val rawY = textDef.y * heightPoints
-                    val fontMetricsTemp = Paint().apply { textSize = textDef.fontSize * (widthPoints / 400f) }.fontMetrics
+                    val lines = textDef.text.split("\n")
+                    val fontMetrics = textPaint.fontMetrics
+                    val lineHeight = fontMetrics.descent - fontMetrics.ascent
+                    val maxLineWidth = lines.map { textPaint.measureText(it) }.maxOrNull() ?: 0f
+
+                    val baseRx = textDef.x * curW
+                    val rawY = textDef.y * curH
+                    val fontMetricsTemp = Paint().apply { textSize = textDef.fontSize * (curW / 400f) }.fontMetrics
                     val powerShift = if (textDef.isPowerOf) (fontMetricsTemp.descent - fontMetricsTemp.ascent) * 0.45f else 0f
                     val ry = rawY - powerShift
+
                     val rxStart = when (textPaint.textAlign) {
-                        Paint.Align.CENTER -> baseRx - textWidth / 2f
-                        Paint.Align.RIGHT -> baseRx - textWidth
+                        Paint.Align.CENTER -> baseRx - maxLineWidth / 2f
+                        Paint.Align.RIGHT -> baseRx - maxLineWidth
                         else -> baseRx
                     }
-                    val rxEnd = rxStart + textWidth
+                    val rxEnd = rxStart + maxLineWidth
 
-                    // Render background bounding box if a background color is set
+                    // Render background bounding box if a background color is set around the entire multiline block
                     if (textDef.bgColorHex.isNotEmpty() && textDef.bgColorHex.lowercase() != "transparent") {
                         try {
-                            val fontMetrics = textPaint.fontMetrics
                             val bgPaint = Paint().apply {
                                 color = Color.parseColor(textDef.bgColorHex)
                                 style = Paint.Style.FILL
@@ -160,7 +193,7 @@ object PdfGenerator {
                                 rxStart - 6f,
                                 ry + fontMetrics.top - 4f,
                                 rxEnd + 6f,
-                                ry + fontMetrics.bottom + 4f,
+                                ry + (lines.size - 1) * lineHeight + fontMetrics.bottom + 4f,
                                 bgPaint
                             )
                         } catch (e: Exception) {
@@ -170,7 +203,6 @@ object PdfGenerator {
 
                     if (textDef.hasOutline) {
                         try {
-                            val fontMetrics = textPaint.fontMetrics
                             val outlinePaint = Paint().apply {
                                 color = Color.parseColor(textDef.outlineColorHex)
                                 style = Paint.Style.STROKE
@@ -180,7 +212,7 @@ object PdfGenerator {
                                 rxStart - 6f,
                                 ry + fontMetrics.top - 4f,
                                 rxEnd + 6f,
-                                ry + fontMetrics.bottom + 4f,
+                                ry + (lines.size - 1) * lineHeight + fontMetrics.bottom + 4f,
                                 outlinePaint
                             )
                         } catch (e: Exception) {
@@ -188,53 +220,58 @@ object PdfGenerator {
                         }
                     }
 
-                    if (textDef.hasUnderline) {
-                        try {
-                            val underlinePaint = Paint().apply {
-                                color = Color.parseColor(textDef.colorHex)
-                                style = Paint.Style.STROKE
-                                strokeWidth = 1.5f
-                            }
-                            canvas.drawLine(
-                                rxStart,
-                                ry + 3f,
-                                rxEnd,
-                                ry + 3f,
-                                underlinePaint
-                            )
-                        } catch (e: Exception) {
-                            e.printStackTrace()
+                    for ((lineIdx, lineText) in lines.withIndex()) {
+                        val lineY = ry + lineIdx * lineHeight
+                        val lineWidth = textPaint.measureText(lineText)
+                        val lineRxStart = when (textPaint.textAlign) {
+                            Paint.Align.CENTER -> baseRx - lineWidth / 2f
+                            Paint.Align.RIGHT -> baseRx - lineWidth
+                            else -> baseRx
                         }
-                    }
+                        val lineRxEnd = lineRxStart + lineWidth
 
-                    if (textDef.hasStrikeThrough) {
-                        try {
-                            val fontMetrics = textPaint.fontMetrics
-                            val middleY = ry + (fontMetrics.ascent + fontMetrics.descent) / 2f
-                            val strikePaint = Paint().apply {
-                                color = Color.parseColor(textDef.colorHex)
-                                style = Paint.Style.STROKE
-                                strokeWidth = 1.5f
+                        if (textDef.hasUnderline) {
+                            try {
+                                val underlinePaint = Paint().apply {
+                                    color = Color.parseColor(textDef.colorHex)
+                                    style = Paint.Style.STROKE
+                                    strokeWidth = 1.5f
+                                }
+                                canvas.drawLine(
+                                    lineRxStart,
+                                    lineY + 3f,
+                                    lineRxEnd,
+                                    lineY + 3f,
+                                    underlinePaint
+                                )
+                            } catch (e: Exception) {
+                                e.printStackTrace()
                             }
-                            canvas.drawLine(
-                                rxStart,
-                                middleY,
-                                rxEnd,
-                                middleY,
-                                strikePaint
-                            )
-                        } catch (e: Exception) {
-                            e.printStackTrace()
                         }
-                    }
 
-                    // Adjust y so text draws appropriately relative to baseline
-                    canvas.drawText(
-                        textDef.text,
-                        baseRx,
-                        ry,
-                        textPaint
-                    )
+                        if (textDef.hasStrikeThrough) {
+                            try {
+                                val middleY = lineY + (fontMetrics.ascent + fontMetrics.descent) / 2f
+                                val strikePaint = Paint().apply {
+                                    color = Color.parseColor(textDef.colorHex)
+                                    style = Paint.Style.STROKE
+                                    strokeWidth = 1.5f
+                                }
+                                canvas.drawLine(
+                                    lineRxStart,
+                                    middleY,
+                                    lineRxEnd,
+                                    middleY,
+                                    strikePaint
+                                )
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                            }
+                        }
+
+                        // Draw line text correctly centered, right, or left of the baseline coordinate!
+                        canvas.drawText(lineText, baseRx, lineY, textPaint)
+                    }
                 }
 
                 // 5. Draw Signatures overlays
@@ -244,10 +281,10 @@ object PdfGenerator {
                         drawSignatureOverlay(
                             canvas,
                             matchingSig,
-                            sigDef.x * widthPoints,
-                            sigDef.y * heightPoints,
-                            sigDef.width * (widthPoints / 400f),
-                            sigDef.height * (heightPoints / 400f)
+                            sigDef.x * curW,
+                            sigDef.y * curH,
+                            sigDef.width * (curW / 400f),
+                            sigDef.height * (curW / 400f)
                         )
                     }
                 }

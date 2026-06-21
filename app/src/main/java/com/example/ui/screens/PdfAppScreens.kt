@@ -37,6 +37,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Help
+import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.outlined.Help
 import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
 import androidx.compose.material.icons.filled.*
@@ -48,6 +50,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -64,6 +67,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
@@ -80,12 +84,17 @@ import java.io.File
 import kotlin.math.roundToInt
 
 fun getFontFamily(fontName: String?): FontFamily {
-    return when (fontName?.lowercase()) {
-        "serif" -> FontFamily.Serif
-        "monospace" -> FontFamily.Monospace
-        "cursive" -> FontFamily.Cursive
-        else -> FontFamily.SansSerif
+    val typeface = when (fontName?.lowercase()) {
+        "times new roman" -> android.graphics.Typeface.create("serif", android.graphics.Typeface.NORMAL)
+        "tahoma" -> android.graphics.Typeface.create("sans-serif-condensed", android.graphics.Typeface.NORMAL)
+        "calibri" -> android.graphics.Typeface.create("sans-serif-light", android.graphics.Typeface.NORMAL)
+        "arial" -> android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.NORMAL)
+        "serif" -> android.graphics.Typeface.create("serif", android.graphics.Typeface.NORMAL)
+        "monospace" -> android.graphics.Typeface.create("monospace", android.graphics.Typeface.NORMAL)
+        "cursive" -> android.graphics.Typeface.create("serif", android.graphics.Typeface.NORMAL)
+        else -> android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.NORMAL)
     }
+    return FontFamily(typeface)
 }
 
 @Composable
@@ -376,7 +385,7 @@ fun DashboardScreen(
                             )
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = "Auto-detect & OCR text from camera",
+                                text = "Auto-detect and scan docs from camera",
                                 color = Color(0xFF001C3B).copy(alpha = 0.7f),
                                 fontSize = 11.sp
                             )
@@ -408,7 +417,7 @@ fun DashboardScreen(
                         iconBackground = Color(0xFFFFEDD5),
                         iconTint = Color(0xFFEA580C),
                         title = "Edit & Notes",
-                        subtitle = "Rich design layouts",
+                        subtitle = "New note and import docs",
                         tag = "action_note",
                         modifier = Modifier.weight(1f),
                         onClick = { showCreateDialog = true }
@@ -419,7 +428,7 @@ fun DashboardScreen(
                         iconBackground = Color(0xFFF3E8FF),
                         iconTint = Color(0xFF9333EA),
                         title = "E-Sign Studio",
-                        subtitle = "Draw ink signature",
+                        subtitle = "Draw and import signature",
                         tag = "action_sign",
                         modifier = Modifier.weight(1f),
                         onClick = { viewModel.navigateTo(Screen.SignatureStudio) }
@@ -436,7 +445,7 @@ fun DashboardScreen(
                         iconBackground = Color(0xFFD1FAE5),
                         iconTint = Color(0xFF059669),
                         title = "Scan ID Card",
-                        subtitle = "Form-fitted scanner",
+                        subtitle = "ID card scanner",
                         tag = "action_id",
                         modifier = Modifier.weight(1f),
                         onClick = {
@@ -1063,10 +1072,95 @@ fun SignatureProfileItem(
         )
     }
 
+    var showPreviewDialog by remember { mutableStateOf(false) }
+
+    if (showPreviewDialog) {
+        AlertDialog(
+            onDismissRequest = { showPreviewDialog = false },
+            title = {
+                Text(
+                    text = sig.alias,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp
+                )
+            },
+            text = {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(2f)
+                        .background(Color.White, RoundedCornerShape(8.dp))
+                        .border(1.dp, Color.LightGray, RoundedCornerShape(8.dp))
+                        .padding(16.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (sig.pathDataJson.startsWith("image:")) {
+                        val imagePath = sig.pathDataJson.removePrefix("image:")
+                        val bitmap = remember(imagePath) {
+                            try {
+                                android.graphics.BitmapFactory.decodeFile(imagePath)
+                            } catch (e: Exception) {
+                                null
+                            }
+                        }
+                        if (bitmap != null) {
+                            androidx.compose.foundation.Image(
+                                bitmap = bitmap.asImageBitmap(),
+                                contentDescription = "Signature Preview",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Fit
+                            )
+                        } else {
+                            Text("Image Error", color = Color.Red, fontSize = 14.sp)
+                        }
+                    } else {
+                        Canvas(modifier = Modifier.fillMaxSize()) {
+                            val points = DocumentSerializer.pointsFromJson(sig.pathDataJson)
+                            if (points.isNotEmpty()) {
+                                val path = Path()
+                                val first = points.first()
+                                path.moveTo(first.x * size.width, first.y * size.height)
+                                
+                                for (i in 1 until points.size) {
+                                    val p = points[i]
+                                    if (p.x == -1f && p.y == -1f) {
+                                        if (i + 1 < points.size) {
+                                            val next = points[i + 1]
+                                            path.moveTo(next.x * size.width, next.y * size.height)
+                                        }
+                                    } else {
+                                        path.lineTo(p.x * size.width, p.y * size.height)
+                                    }
+                                }
+                                drawPath(
+                                    path = path,
+                                    color = Color(AndroidColor.parseColor(sig.colorHex)),
+                                    style = Stroke(
+                                        width = sig.strokeWidth * (size.width / 200f).coerceAtLeast(1.5f),
+                                        cap = StrokeCap.Round,
+                                        join = StrokeJoin.Round
+                                    )
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showPreviewDialog = false }) {
+                    Text("Close")
+                }
+            }
+        )
+    }
+
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         shape = RoundedCornerShape(12.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.08f))
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.08f)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { showPreviewDialog = true }
     ) {
         Row(
             modifier = Modifier
@@ -1200,6 +1294,8 @@ fun SignatureStudioScreen(
                                     selectedColor,
                                     selectedThickness
                                 )
+                                drawnPoints.clear()
+                                aliasText = TextFieldValue("")
                             }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
@@ -1437,6 +1533,32 @@ fun SignatureStudioScreen(
                     }
                 }
             } else {
+                var signatureToDelete by remember { mutableStateOf<com.example.data.SignatureProfile?>(null) }
+
+                if (signatureToDelete != null) {
+                    AlertDialog(
+                        onDismissRequest = { signatureToDelete = null },
+                        title = { Text("Delete Signature Profile", fontWeight = FontWeight.Bold) },
+                        text = { Text("Are you sure you want to permanently delete this signature profile? This action cannot be undone.") },
+                        confirmButton = {
+                            Button(
+                                onClick = {
+                                    signatureToDelete?.let { viewModel.deleteSignatureProfile(it) }
+                                    signatureToDelete = null
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                            ) {
+                                Text("Delete")
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { signatureToDelete = null }) {
+                                Text("Cancel")
+                            }
+                        }
+                    )
+                }
+
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1446,7 +1568,7 @@ fun SignatureStudioScreen(
                     items(state.signatures) { sig ->
                         SignatureProfileItem(
                             sig = sig,
-                            onDelete = { viewModel.deleteSignatureProfile(sig) },
+                            onDelete = { signatureToDelete = sig },
                             onRename = { newName -> viewModel.renameSignatureProfile(sig, newName) }
                         )
                     }
@@ -1579,7 +1701,7 @@ fun ScannerScreen(
                 if (selectedBmp != null) {
                     if (state.scannerIdMode) {
                         if (!isFrontScapped) {
-                            viewModel.captureScannerStep(selectedBmp)
+                            viewModel.captureScannerStep(selectedBmp, isImported = true)
                             draftFrontBitmap = selectedBmp
                             isFrontScapped = true
                         } else {
@@ -1589,8 +1711,8 @@ fun ScannerScreen(
                             Toast.makeText(context, "Identity Card Compiled from Gallery!", Toast.LENGTH_SHORT).show()
                         }
                     } else {
-                        viewModel.captureScannerStep(selectedBmp)
-                        viewModel.triggerFeedback("Photo imported: Page ${state.scannerStepBitmaps.size} added.")
+                        viewModel.captureScannerStep(selectedBmp, isImported = true)
+                        viewModel.triggerFeedback("Photo imported successfully! Tap DONE below or on the right to proceed to Crop Studio.")
                     }
                 } else {
                     Toast.makeText(context, "Unable to load image. File may be corrupted.", Toast.LENGTH_LONG).show()
@@ -1634,25 +1756,7 @@ fun ScannerScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Dashboard")
                     }
                 },
-                actions = {
-                    // Quick mode selector button
-                    TextButton(
-                        onClick = {
-                            if (!hasCameraPermission) {
-                                cameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
-                            } else {
-                                liveCameraMode = !liveCameraMode
-                            }
-                        }
-                    ) {
-                        Text(
-                            text = if (liveCameraMode) "Switch to Sandbox" else "Use Live Camera",
-                            color = MaterialTheme.colorScheme.primary,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
+                actions = {}
             )
         }
     ) { padding ->
@@ -2025,29 +2129,22 @@ fun ScannerScreen(
                         )
                     }
 
-                    // Next Screen Compile Action button
-                    IconButton(
-                        onClick = {
-                            if (state.scannerStepBitmaps.isNotEmpty()) {
-                                viewModel.navigateTo(Screen.ScanEdit)
-                            } else {
-                                Toast.makeText(context, "Please scan or upload at least one page first", Toast.LENGTH_SHORT).show()
-                            }
-                        },
-                        enabled = state.scannerStepBitmaps.isNotEmpty(),
-                        modifier = Modifier
-                            .size(54.dp)
-                            .background(
-                                if (state.scannerStepBitmaps.isNotEmpty()) Color(0xFF10AC84) else Color(0xFF1E293B).copy(alpha = 0.5f), 
-                                CircleShape
-                            )
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Check,
-                            contentDescription = "Next screen",
-                            tint = Color.White,
-                            modifier = Modifier.size(24.dp)
-                        )
+                    // Elegant "Done" button to proceed directly to the Crop Studio
+                    if (state.scannerStepBitmaps.isNotEmpty()) {
+                        Button(
+                            onClick = { viewModel.navigateTo(Screen.ScanEdit) },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10AC84)),
+                            shape = CircleShape,
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                            modifier = Modifier
+                                .height(54.dp)
+                                .widthIn(min = 80.dp)
+                                .testTag("scanner_done_button")
+                        ) {
+                            Text("DONE", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                    } else {
+                        Spacer(modifier = Modifier.size(54.dp))
                     }
                 }
 
@@ -2090,40 +2187,97 @@ fun ScanEditScreen(
     var selectedFilter by remember { mutableStateOf("original") }
     var isCropping by remember { mutableStateOf(true) }
 
-    // Normalized coordinates for the four draggable corner anchors (0f to 1f)
-    var topLeft by remember { mutableStateOf(Offset(0.05f, 0.05f)) }
-    var topRight by remember { mutableStateOf(Offset(0.95f, 0.05f)) }
-    var bottomRight by remember { mutableStateOf(Offset(0.95f, 0.95f)) }
-    var bottomLeft by remember { mutableStateOf(Offset(0.05f, 0.95f)) }
+    // Normalized rectangle coordinates for crop bounds (0f to 1f)
+    var cropLeft by remember { mutableStateOf(0.05f) }
+    var cropTop by remember { mutableStateOf(0.05f) }
+    var cropRight by remember { mutableStateOf(0.95f) }
+    var cropBottom by remember { mutableStateOf(0.95f) }
 
-    if (isCropping && state.scannerStepBitmaps.isNotEmpty()) {
-        val activeBitmap = state.scannerStepBitmaps.first()
+    var activeRatioPreset by remember { mutableStateOf("free") }
+
+    val topLeft = Offset(cropLeft, cropTop)
+    val topRight = Offset(cropRight, cropTop)
+    val bottomRight = Offset(cropRight, cropBottom)
+    val bottomLeft = Offset(cropLeft, cropBottom)
+
+    val context = LocalContext.current
+
+    // Image Picker launcher to directly upload/replace an image in PDF Crop Studio
+    val imagePickerLauncher = rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            try {
+                val inputStream = context.contentResolver.openInputStream(uri)
+                val selectedBmp = BitmapFactory.decodeStream(inputStream)
+                inputStream?.close()
+                if (selectedBmp != null) {
+                    viewModel.resetScanner()
+                    viewModel.captureScannerStep(selectedBmp, isImported = true)
+                    cropLeft = 0.05f
+                    cropTop = 0.05f
+                    cropRight = 0.95f
+                    cropBottom = 0.95f
+                    activeRatioPreset = "free"
+                    viewModel.triggerFeedback("Image uploaded successfully to Crop Studio!")
+                } else {
+                    android.widget.Toast.makeText(context, "Could not decode selected image file.", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                android.widget.Toast.makeText(context, "Upload failed: ${e.localizedMessage}", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    LaunchedEffect(isCropping) {
+        if (isCropping) {
+            cropLeft = 0.05f
+            cropTop = 0.05f
+            cropRight = 0.95f
+            cropBottom = 0.95f
+            activeRatioPreset = "free"
+        }
+    }
+
+    if (isCropping) {
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { Text("Adobe Crop Studio", fontWeight = FontWeight.Bold) },
+                    title = { Text("PDF Crop Studio", fontWeight = FontWeight.Bold) },
                     navigationIcon = {
                         IconButton(onClick = { isCropping = false }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                         }
                     },
                     actions = {
-                        Button(
-                            onClick = {
-                                viewModel.cropScannedPage(
-                                    index = 0,
-                                    topLeftX = topLeft.x, topLeftY = topLeft.y,
-                                    topRightX = topRight.x, topRightY = topRight.y,
-                                    bottomRightX = bottomRight.x, bottomRightY = bottomRight.y,
-                                    bottomLeftX = bottomLeft.x, bottomLeftY = bottomLeft.y
-                                )
-                                isCropping = false
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-                        ) {
-                            Icon(Icons.Default.Crop, "Crop")
+                        if (state.scannerStepBitmaps.isNotEmpty()) {
+                            // Upload option to easily change the image
+                            IconButton(
+                                onClick = { imagePickerLauncher.launch("image/*") },
+                                modifier = Modifier.testTag("crop_change_image_button")
+                            ) {
+                                Icon(Icons.Default.CloudUpload, contentDescription = "Change Image")
+                            }
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Apply Crop")
+                            Button(
+                                onClick = {
+                                    viewModel.cropScannedPage(
+                                        index = 0,
+                                        topLeftX = cropLeft, topLeftY = cropTop,
+                                        topRightX = cropRight, topRightY = cropTop,
+                                        bottomRightX = cropRight, bottomRightY = cropBottom,
+                                        bottomLeftX = cropLeft, bottomLeftY = cropBottom
+                                    )
+                                    isCropping = false
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10AC84)),
+                                modifier = Modifier.testTag("apply_crop_button")
+                            ) {
+                                Icon(Icons.Default.Crop, "Crop")
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Apply Crop")
+                            }
                         }
                     }
                 )
@@ -2137,167 +2291,429 @@ fun ScanEditScreen(
                     .padding(16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Text(
-                    text = "Drag the four corner anchors to align and crop your scanned page perfectly.",
-                    color = Color.White.copy(alpha = 0.7f),
-                    fontSize = 12.sp,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                    modifier = Modifier.padding(bottom = 16.dp)
-                )
-
-                BoxWithConstraints(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                        .background(Color.Black, RoundedCornerShape(16.dp))
-                        .padding(8.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    val containerWidth = maxWidth
-                    val containerHeight = maxHeight
-                    val density = LocalDensity.current
-                    val containerWidthPx = with(density) { containerWidth.toPx() }
-                    val containerHeightPx = with(density) { containerHeight.toPx() }
-
+                if (state.scannerStepBitmaps.isNotEmpty()) {
+                    val activeBitmap = state.scannerStepBitmaps.first()
                     val bitmapWidth = activeBitmap.width.toFloat()
                     val bitmapHeight = activeBitmap.height.toFloat()
 
-                    val scaleFactor = minOf(
-                        containerWidthPx / bitmapWidth,
-                        containerHeightPx / bitmapHeight
+                    Text(
+                        text = "Drag corners to resize, drag center to position. Lock aspect ratio using presets.",
+                        color = Color.White.copy(alpha = 0.7f),
+                        fontSize = 12.sp,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        modifier = Modifier.padding(bottom = 8.dp)
                     )
 
-                    val displayedImageWidth = bitmapWidth * scaleFactor
-                    val displayedImageHeight = bitmapHeight * scaleFactor
-
-                    val imageLeft = (containerWidthPx - displayedImageWidth) / 2f
-                    val imageTop = (containerHeightPx - displayedImageHeight) / 2f
-
-                    Image(
-                        bitmap = activeBitmap.asImageBitmap(),
-                        contentDescription = "Original scan to crop",
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Fit
-                    )
-
-                    Canvas(modifier = Modifier.fillMaxSize()) {
-                        val p1 = Offset(imageLeft + topLeft.x * displayedImageWidth, imageTop + topLeft.y * displayedImageHeight)
-                        val p2 = Offset(imageLeft + topRight.x * displayedImageWidth, imageTop + topRight.y * displayedImageHeight)
-                        val p3 = Offset(imageLeft + bottomRight.x * displayedImageWidth, imageTop + bottomRight.y * displayedImageHeight)
-                        val p4 = Offset(imageLeft + bottomLeft.x * displayedImageWidth, imageTop + bottomLeft.y * displayedImageHeight)
-
-                        val path = Path().apply {
-                            moveTo(p1.x, p1.y)
-                            lineTo(p2.x, p2.y)
-                            lineTo(p3.x, p3.y)
-                            lineTo(p4.x, p4.y)
-                            close()
+                    // Aspect ratio presets selector row
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    ) {
+                        val presets = listOf(
+                            "Free" to "free",
+                            "Square 1:1" to "1:1",
+                            "Landscape 16:9" to "16:9",
+                            "Portrait 4:5" to "4:5"
+                        )
+                        presets.forEach { (label, preset) ->
+                            val selected = activeRatioPreset == preset
+                            Button(
+                                onClick = {
+                                    activeRatioPreset = preset
+                                    if (preset != "free") {
+                                        val ratio = when (preset) {
+                                            "1:1" -> 1.0f
+                                            "16:9" -> 16f / 9f
+                                            "4:5" -> 0.8f
+                                            else -> 1.0f
+                                        }
+                                        val imageRatio = bitmapWidth / bitmapHeight
+                                        
+                                        if (imageRatio > ratio) {
+                                            val finalHeight = 0.8f
+                                            val finalWidth = ratio * finalHeight * (bitmapHeight / bitmapWidth)
+                                            cropLeft = ((1f - finalWidth) / 2f).coerceIn(0f, 1f)
+                                            cropRight = (cropLeft + finalWidth).coerceIn(0f, 1f)
+                                            cropTop = 0.1f
+                                            cropBottom = 0.9f
+                                        } else {
+                                            val finalWidth = 0.8f
+                                            val finalHeight = finalWidth / (ratio * (bitmapHeight / bitmapWidth))
+                                            cropLeft = 0.1f
+                                            cropRight = 0.9f
+                                            cropTop = ((1f - finalHeight) / 2f).coerceIn(0f, 1f)
+                                            cropBottom = (cropTop + finalHeight).coerceIn(0f, 1f)
+                                        }
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (selected) Color(0xFF10AC84) else Color(0xFF1E293B),
+                                    contentColor = if (selected) Color.White else Color.White.copy(alpha = 0.8f)
+                                ),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                modifier = Modifier.height(32.dp).testTag("preset_$preset")
+                            ) {
+                                Text(label, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
-
-                        // Fill color interior slightly green
-                        drawPath(path, color = Color(0x3310AC84))
-
-                        // Draw outer boundary stroke
-                        drawPath(path, color = Color(0xFF10AC84), style = Stroke(width = 6f))
-
-                        // Draw circle corner markers
-                        drawCircle(Color.White, 32f, p1)
-                        drawCircle(Color(0xFF10AC84), 22f, p1)
-
-                        drawCircle(Color.White, 32f, p2)
-                        drawCircle(Color(0xFF10AC84), 22f, p2)
-
-                        drawCircle(Color.White, 32f, p3)
-                        drawCircle(Color(0xFF10AC84), 22f, p3)
-
-                        drawCircle(Color.White, 32f, p4)
-                        drawCircle(Color(0xFF10AC84), 22f, p4)
                     }
 
-                    // Touch boundary boxes on top of the canvas
-                    // Top Left
-                    val topLeftX = with(density) { (imageLeft + topLeft.x * displayedImageWidth).toDp() }
-                    val topLeftY = with(density) { (imageTop + topLeft.y * displayedImageHeight).toDp() }
-                    Box(
+                    BoxWithConstraints(
                         modifier = Modifier
-                            .offset(
-                                x = topLeftX - 28.dp,
-                                y = topLeftY - 28.dp
-                            )
-                            .size(56.dp)
-                            .pointerInput(Unit) {
-                                detectDragGestures { change, dragAmount ->
-                                    change.consume()
-                                    topLeft = Offset(
-                                        x = (topLeft.x + dragAmount.x / displayedImageWidth).coerceIn(0f, topRight.x - 0.05f),
-                                        y = (topLeft.y + dragAmount.y / displayedImageHeight).coerceIn(0f, bottomLeft.y - 0.05f)
-                                    )
-                                }
-                            }
-                    )
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .background(Color.Black, RoundedCornerShape(16.dp))
+                            .padding(8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        val containerWidth = maxWidth
+                        val containerHeight = maxHeight
+                        val density = LocalDensity.current
+                        val containerWidthPx = with(density) { containerWidth.toPx() }
+                        val containerHeightPx = with(density) { containerHeight.toPx() }
 
-                    // Top Right
-                    val topRightX = with(density) { (imageLeft + topRight.x * displayedImageWidth).toDp() }
-                    val topRightY = with(density) { (imageTop + topRight.y * displayedImageHeight).toDp() }
-                    Box(
-                        modifier = Modifier
-                            .offset(
-                                x = topRightX - 28.dp,
-                                y = topRightY - 28.dp
-                            )
-                            .size(56.dp)
-                            .pointerInput(Unit) {
-                                detectDragGestures { change, dragAmount ->
-                                    change.consume()
-                                    topRight = Offset(
-                                        x = (topRight.x + dragAmount.x / displayedImageWidth).coerceIn(topLeft.x + 0.05f, 1f),
-                                        y = (topRight.y + dragAmount.y / displayedImageHeight).coerceIn(0f, bottomRight.y - 0.05f)
-                                    )
-                                }
-                            }
-                    )
+                        val scaleFactor = minOf(
+                            containerWidthPx / bitmapWidth,
+                            containerHeightPx / bitmapHeight
+                        )
 
-                    // Bottom Right
-                    val bottomRightX = with(density) { (imageLeft + bottomRight.x * displayedImageWidth).toDp() }
-                    val bottomRightY = with(density) { (imageTop + bottomRight.y * displayedImageHeight).toDp() }
-                    Box(
-                        modifier = Modifier
-                            .offset(
-                                x = bottomRightX - 28.dp,
-                                y = bottomRightY - 28.dp
-                            )
-                            .size(56.dp)
-                            .pointerInput(Unit) {
-                                detectDragGestures { change, dragAmount ->
-                                    change.consume()
-                                    bottomRight = Offset(
-                                        x = (bottomRight.x + dragAmount.x / displayedImageWidth).coerceIn(bottomLeft.x + 0.05f, 1f),
-                                        y = (bottomRight.y + dragAmount.y / displayedImageHeight).coerceIn(topRight.y + 0.05f, 1f)
-                                    )
-                                }
-                            }
-                    )
+                        val displayedImageWidth = bitmapWidth * scaleFactor
+                        val displayedImageHeight = bitmapHeight * scaleFactor
 
-                    // Bottom Left
-                    val bottomLeftX = with(density) { (imageLeft + bottomLeft.x * displayedImageWidth).toDp() }
-                    val bottomLeftY = with(density) { (imageTop + bottomLeft.y * displayedImageHeight).toDp() }
+                        val imageLeft = (containerWidthPx - displayedImageWidth) / 2f
+                        val imageTop = (containerHeightPx - displayedImageHeight) / 2f
+
+                        Image(
+                            bitmap = activeBitmap.asImageBitmap(),
+                            contentDescription = "Original scan to crop",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Fit
+                        )
+
+                        Canvas(modifier = Modifier.fillMaxSize()) {
+                            val p1 = Offset(imageLeft + cropLeft * displayedImageWidth, imageTop + cropTop * displayedImageHeight)
+                            val p2 = Offset(imageLeft + cropRight * displayedImageWidth, imageTop + cropTop * displayedImageHeight)
+                            val p3 = Offset(imageLeft + cropRight * displayedImageWidth, imageTop + cropBottom * displayedImageHeight)
+                            val p4 = Offset(imageLeft + cropLeft * displayedImageWidth, imageTop + cropBottom * displayedImageHeight)
+
+                            // Semi-transparent overlay to darken uncropped areas
+                            val fullPath = Path().apply {
+                                fillType = androidx.compose.ui.graphics.PathFillType.EvenOdd
+                                addRect(androidx.compose.ui.geometry.Rect(imageLeft, imageTop, imageLeft + displayedImageWidth, imageTop + displayedImageHeight))
+                                moveTo(p1.x, p1.y)
+                                lineTo(p2.x, p2.y)
+                                lineTo(p3.x, p3.y)
+                                lineTo(p4.x, p4.y)
+                                close()
+                            }
+                            drawPath(fullPath, color = Color.Black.copy(alpha = 0.65f))
+
+                            // Draw a bright, elegant borders for the cropping box
+                            val cropBoxPath = Path().apply {
+                                moveTo(p1.x, p1.y)
+                                lineTo(p2.x, p2.y)
+                                lineTo(p3.x, p3.y)
+                                lineTo(p4.x, p4.y)
+                                close()
+                            }
+                            drawPath(cropBoxPath, color = Color(0xFF10AC84), style = Stroke(width = 5f))
+
+                            // Draw high contrast visual corner handles
+                            drawCircle(Color.White, 20f, p1)
+                            drawCircle(Color(0xFF10AC84), 12f, p1)
+
+                            drawCircle(Color.White, 20f, p2)
+                            drawCircle(Color(0xFF10AC84), 12f, p2)
+
+                            drawCircle(Color.White, 20f, p3)
+                            drawCircle(Color(0xFF10AC84), 12f, p3)
+
+                            drawCircle(Color.White, 20f, p4)
+                            drawCircle(Color(0xFF10AC84), 12f, p4)
+                        }
+
+                        // Absolute positioned draggable center overlay box
+                        val cropWidthDp = with(density) { ((cropRight - cropLeft) * displayedImageWidth).toDp() }
+                        val cropHeightDp = with(density) { ((cropBottom - cropTop) * displayedImageHeight).toDp() }
+                        val cropLeftDp = with(density) { (imageLeft + cropLeft * displayedImageWidth).toDp() }
+                        val cropTopDp = with(density) { (imageTop + cropTop * displayedImageHeight).toDp() }
+
+                        Box(
+                            modifier = Modifier
+                                .offset(x = cropLeftDp, y = cropTopDp)
+                                .size(width = cropWidthDp, height = cropHeightDp)
+                                .pointerInput(displayedImageWidth, displayedImageHeight, cropLeft, cropRight, cropTop, cropBottom) {
+                                    detectDragGestures { change, dragAmount ->
+                                        change.consume()
+                                        val dx = dragAmount.x / displayedImageWidth
+                                        val dy = dragAmount.y / displayedImageHeight
+                                        
+                                        val currentWidth = cropRight - cropLeft
+                                        val currentHeight = cropBottom - cropTop
+                                        
+                                        val newLeft = (cropLeft + dx).coerceIn(0f, 1f - currentWidth)
+                                        val newTop = (cropTop + dy).coerceIn(0f, 1f - currentHeight)
+                                        
+                                        cropLeft = newLeft
+                                        cropRight = newLeft + currentWidth
+                                        cropTop = newTop
+                                        cropBottom = newTop + currentHeight
+                                    }
+                                }
+                                .testTag("crop_center_drag_area"),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            // Draggable indicator
+                            Icon(
+                                imageVector = Icons.Default.OpenWith,
+                                contentDescription = "Drag Position",
+                                tint = Color.White.copy(alpha = 0.5f),
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .background(Color.Black.copy(alpha = 0.3f), CircleShape)
+                                    .padding(6.dp)
+                            )
+                        }
+
+                        // Draggable Touch Corner Boxes on top of center region for priority response
+                        // Top Left Corner Drag handle
+                        val topLeftX = with(density) { (imageLeft + cropLeft * displayedImageWidth).toDp() }
+                        val topLeftY = with(density) { (imageTop + cropTop * displayedImageHeight).toDp() }
+                        Box(
+                            modifier = Modifier
+                                .offset(x = topLeftX - 28.dp, y = topLeftY - 28.dp)
+                                .size(56.dp)
+                                .pointerInput(displayedImageWidth, displayedImageHeight, activeRatioPreset, cropRight, cropBottom) {
+                                    detectDragGestures { change, dragAmount ->
+                                        change.consume()
+                                        val dx = dragAmount.x / displayedImageWidth
+                                        val dy = dragAmount.y / displayedImageHeight
+                                        
+                                        if (activeRatioPreset == "free") {
+                                            cropLeft = (cropLeft + dx).coerceIn(0f, cropRight - 0.05f)
+                                            cropTop = (cropTop + dy).coerceIn(0f, cropBottom - 0.05f)
+                                        } else {
+                                            val targetRatio = when (activeRatioPreset) {
+                                                "1:1" -> 1.0f
+                                                "16:9" -> 16f / 9f
+                                                "4:5" -> 0.8f
+                                                else -> 1.0f
+                                            }
+                                            var newLeft = (cropLeft + dx).coerceIn(0f, cropRight - 0.05f)
+                                            val targetPixelWidth = (cropRight - newLeft) * bitmapWidth
+                                            val targetPixelHeight = targetPixelWidth / targetRatio
+                                            var newTop = cropBottom - (targetPixelHeight / bitmapHeight)
+                                            
+                                            if (newTop < 0f) {
+                                                newTop = 0f
+                                                val allowedPixelHeight = (cropBottom - newTop) * bitmapHeight
+                                                val allowedPixelWidth = allowedPixelHeight * targetRatio
+                                                newLeft = cropRight - (allowedPixelWidth / bitmapWidth)
+                                            } else if (newTop > cropBottom - 0.05f) {
+                                                newTop = cropBottom - 0.05f
+                                                val allowedPixelHeight = (cropBottom - newTop) * bitmapHeight
+                                                val allowedPixelWidth = allowedPixelHeight * targetRatio
+                                                newLeft = cropRight - (allowedPixelWidth / bitmapWidth)
+                                            }
+                                            
+                                            cropLeft = newLeft.coerceIn(0f, cropRight - 0.05f)
+                                            cropTop = newTop.coerceIn(0f, cropBottom - 0.05f)
+                                        }
+                                    }
+                                }
+                                .testTag("crop_handle_top_left")
+                        )
+
+                        // Top Right Corner Drag handle
+                        val topRightX = with(density) { (imageLeft + cropRight * displayedImageWidth).toDp() }
+                        val topRightY = with(density) { (imageTop + cropTop * displayedImageHeight).toDp() }
+                        Box(
+                            modifier = Modifier
+                                .offset(x = topRightX - 28.dp, y = topRightY - 28.dp)
+                                .size(56.dp)
+                                .pointerInput(displayedImageWidth, displayedImageHeight, activeRatioPreset, cropLeft, cropBottom) {
+                                    detectDragGestures { change, dragAmount ->
+                                        change.consume()
+                                        val dx = dragAmount.x / displayedImageWidth
+                                        val dy = dragAmount.y / displayedImageHeight
+                                        
+                                        if (activeRatioPreset == "free") {
+                                            cropRight = (cropRight + dx).coerceIn(cropLeft + 0.05f, 1f)
+                                            cropTop = (cropTop + dy).coerceIn(0f, cropBottom - 0.05f)
+                                        } else {
+                                            val targetRatio = when (activeRatioPreset) {
+                                                "1:1" -> 1.0f
+                                                "16:9" -> 16f / 9f
+                                                "4:5" -> 0.8f
+                                                else -> 1.0f
+                                            }
+                                            var newRight = (cropRight + dx).coerceIn(cropLeft + 0.05f, 1f)
+                                            val targetPixelWidth = (newRight - cropLeft) * bitmapWidth
+                                            val targetPixelHeight = targetPixelWidth / targetRatio
+                                            var newTop = cropBottom - (targetPixelHeight / bitmapHeight)
+                                            
+                                            if (newTop < 0f) {
+                                                newTop = 0f
+                                                val allowedPixelHeight = (cropBottom - newTop) * bitmapHeight
+                                                val allowedPixelWidth = allowedPixelHeight * targetRatio
+                                                newRight = cropLeft + (allowedPixelWidth / bitmapWidth)
+                                            } else if (newTop > cropBottom - 0.05f) {
+                                                newTop = cropBottom - 0.05f
+                                                val allowedPixelHeight = (cropBottom - newTop) * bitmapHeight
+                                                val allowedPixelWidth = allowedPixelHeight * targetRatio
+                                                newRight = cropLeft + (allowedPixelWidth / bitmapWidth)
+                                            }
+                                            
+                                            cropRight = newRight.coerceIn(cropLeft + 0.05f, 1f)
+                                            cropTop = newTop.coerceIn(0f, cropBottom - 0.05f)
+                                        }
+                                    }
+                                }
+                                .testTag("crop_handle_top_right")
+                        )
+
+                        // Bottom Right Corner Drag handle
+                        val bottomRightX = with(density) { (imageLeft + cropRight * displayedImageWidth).toDp() }
+                        val bottomRightY = with(density) { (imageTop + cropBottom * displayedImageHeight).toDp() }
+                        Box(
+                            modifier = Modifier
+                                .offset(x = bottomRightX - 28.dp, y = bottomRightY - 28.dp)
+                                .size(56.dp)
+                                .pointerInput(displayedImageWidth, displayedImageHeight, activeRatioPreset, cropLeft, cropTop) {
+                                    detectDragGestures { change, dragAmount ->
+                                        change.consume()
+                                        val dx = dragAmount.x / displayedImageWidth
+                                        val dy = dragAmount.y / displayedImageHeight
+                                        
+                                        if (activeRatioPreset == "free") {
+                                            cropRight = (cropRight + dx).coerceIn(cropLeft + 0.05f, 1f)
+                                            cropBottom = (cropBottom + dy).coerceIn(cropTop + 0.05f, 1f)
+                                        } else {
+                                            val targetRatio = when (activeRatioPreset) {
+                                                "1:1" -> 1.0f
+                                                "16:9" -> 16f / 9f
+                                                "4:5" -> 0.8f
+                                                else -> 1.0f
+                                            }
+                                            var newRight = (cropRight + dx).coerceIn(cropLeft + 0.05f, 1f)
+                                            val targetPixelWidth = (newRight - cropLeft) * bitmapWidth
+                                            val targetPixelHeight = targetPixelWidth / targetRatio
+                                            var newBottom = cropTop + (targetPixelHeight / bitmapHeight)
+                                            
+                                            if (newBottom > 1f) {
+                                                newBottom = 1f
+                                                val allowedPixelHeight = (newBottom - cropTop) * bitmapHeight
+                                                val allowedPixelWidth = allowedPixelHeight * targetRatio
+                                                newRight = cropLeft + (allowedPixelWidth / bitmapWidth)
+                                            } else if (newBottom < cropTop + 0.05f) {
+                                                newBottom = cropTop + 0.05f
+                                                val allowedPixelHeight = (newBottom - cropTop) * bitmapHeight
+                                                val allowedPixelWidth = allowedPixelHeight * targetRatio
+                                                newRight = cropLeft + (allowedPixelWidth / bitmapWidth)
+                                            }
+                                            
+                                            cropRight = newRight.coerceIn(cropLeft + 0.05f, 1f)
+                                            cropBottom = newBottom.coerceIn(cropTop + 0.05f, 1f)
+                                        }
+                                    }
+                                }
+                                .testTag("crop_handle_bottom_right")
+                        )
+
+                        // Bottom Left Corner Drag handle
+                        val bottomLeftX = with(density) { (imageLeft + cropLeft * displayedImageWidth).toDp() }
+                        val bottomLeftY = with(density) { (imageTop + cropBottom * displayedImageHeight).toDp() }
+                        Box(
+                            modifier = Modifier
+                                .offset(x = bottomLeftX - 28.dp, y = bottomLeftY - 28.dp)
+                                .size(56.dp)
+                                .pointerInput(displayedImageWidth, displayedImageHeight, activeRatioPreset, cropRight, cropTop) {
+                                    detectDragGestures { change, dragAmount ->
+                                        change.consume()
+                                        val dx = dragAmount.x / displayedImageWidth
+                                        val dy = dragAmount.y / displayedImageHeight
+                                        
+                                        if (activeRatioPreset == "free") {
+                                            cropLeft = (cropLeft + dx).coerceIn(0f, cropRight - 0.05f)
+                                            cropBottom = (cropBottom + dy).coerceIn(cropTop + 0.05f, 1f)
+                                        } else {
+                                            val targetRatio = when (activeRatioPreset) {
+                                                "1:1" -> 1.0f
+                                                "16:9" -> 16f / 9f
+                                                "4:5" -> 0.8f
+                                                else -> 1.0f
+                                            }
+                                            var newLeft = (cropLeft + dx).coerceIn(0f, cropRight - 0.05f)
+                                            val targetPixelWidth = (cropRight - newLeft) * bitmapWidth
+                                            val targetPixelHeight = targetPixelWidth / targetRatio
+                                            var newBottom = cropTop + (targetPixelHeight / bitmapHeight)
+                                            
+                                            if (newBottom > 1f) {
+                                                newBottom = 1f
+                                                val allowedPixelHeight = (newBottom - cropTop) * bitmapHeight
+                                                val allowedPixelWidth = allowedPixelHeight * targetRatio
+                                                newLeft = cropRight - (allowedPixelWidth / bitmapWidth)
+                                            } else if (newBottom < cropTop + 0.05f) {
+                                                newBottom = cropTop + 0.05f
+                                                val allowedPixelHeight = (newBottom - cropTop) * bitmapHeight
+                                                val allowedPixelWidth = allowedPixelHeight * targetRatio
+                                                newLeft = cropRight - (allowedPixelWidth / bitmapWidth)
+                                            }
+                                            
+                                            cropLeft = newLeft.coerceIn(0f, cropRight - 0.05f)
+                                            cropBottom = newBottom.coerceIn(cropTop + 0.05f, 1f)
+                                        }
+                                    }
+                                }
+                                .testTag("crop_handle_bottom_left")
+                        )
+                    }
+                } else {
+                    // Display Beautiful Upload Image Canvas when scanner steps are empty
                     Box(
                         modifier = Modifier
-                            .offset(
-                                x = bottomLeftX - 28.dp,
-                                y = bottomLeftY - 28.dp
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .background(Color(0xFF1E293B), RoundedCornerShape(16.dp))
+                            .border(BorderStroke(2.dp, Color(0xFF10AC84).copy(alpha = 0.4f)), RoundedCornerShape(16.dp))
+                            .clickable { imagePickerLauncher.launch("image/*") }
+                            .padding(24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                imageVector = Icons.Default.CloudUpload,
+                                contentDescription = "Upload To Canvas",
+                                tint = Color(0xFF10AC84),
+                                modifier = Modifier.size(64.dp)
                             )
-                            .size(56.dp)
-                            .pointerInput(Unit) {
-                                detectDragGestures { change, dragAmount ->
-                                    change.consume()
-                                    bottomLeft = Offset(
-                                        x = (bottomLeft.x + dragAmount.x / displayedImageWidth).coerceIn(0f, bottomRight.x - 0.05f),
-                                        y = (bottomLeft.y + dragAmount.y / displayedImageHeight).coerceIn(topLeft.y + 0.05f, 1f)
-                                    )
-                                }
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                text = "PDF Crop Studio Canvas",
+                                color = Color.White,
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "No image loaded yet. Tap here to select and upload an image from your device gallery to start cropping, processing and signing!",
+                                color = Color.White.copy(alpha = 0.6f),
+                                fontSize = 13.sp,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                modifier = Modifier.padding(horizontal = 16.dp)
+                            )
+                            Spacer(modifier = Modifier.height(24.dp))
+                            Button(
+                                onClick = { imagePickerLauncher.launch("image/*") },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10AC84)),
+                                modifier = Modifier.testTag("gallery_upload_trigger_button")
+                            ) {
+                                Icon(Icons.Default.Add, "Select Image")
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Select Image from Gallery")
                             }
-                    )
+                        }
+                    }
                 }
             }
         }
@@ -2318,7 +2734,7 @@ fun ScanEditScreen(
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                         ) {
-                            Text("Compile PDF")
+                            Text("Save PDF")
                             Spacer(modifier = Modifier.width(4.dp))
                             Icon(Icons.Default.Check, "Save Compile")
                         }
@@ -2350,14 +2766,18 @@ fun ScanEditScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f)
-                        .background(Color.White, RoundedCornerShape(12.dp))
+                        .background(Color.Black, RoundedCornerShape(12.dp))
                         .border(BorderStroke(1.dp, Color.LightGray), RoundedCornerShape(12.dp))
                         .padding(12.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     if (state.scannerStepBitmaps.isNotEmpty()) {
+                        val baseBmp = state.scannerStepBitmaps.first()
+                        val filteredBmp = remember(baseBmp, state.scannerFilterType) {
+                            viewModel.applyFilterToBitmap(baseBmp, state.scannerFilterType)
+                        }
                         Image(
-                            bitmap = state.scannerStepBitmaps.first().asImageBitmap(), // Preview thumbnail
+                            bitmap = filteredBmp.asImageBitmap(), // Preview thumbnail
                             contentDescription = "Previews compiled",
                             modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(8.dp)),
                             contentScale = ContentScale.Inside
@@ -2379,7 +2799,7 @@ fun ScanEditScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                Text("Apply Document Filters:", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text("Apply Document Filters:", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -2402,7 +2822,7 @@ fun ScanEditScreen(
                                 containerColor = if (isSel) MaterialTheme.colorScheme.primary else Color.Transparent
                             )
                         ) {
-                            Text(display, fontSize = 11.sp, color = if (isSel) Color.White else Color.Black)
+                            Text(display, fontSize = 11.sp, color = Color.White)
                         }
                     }
                 }
@@ -2566,6 +2986,7 @@ fun EditorScreen(
     var showPageWorkbench by remember { mutableStateOf(false) }
     
     var showSignatureSelectionDrawer by remember { mutableStateOf(false) }
+    var showFilterDropdown by remember { mutableStateOf(false) }
     var annotationMode by remember { mutableStateOf("none") } // "none", "draw", "erase", "signature_overlay"
     var drawColorHex by remember { mutableStateOf("#D62246") } // Defaults to Red Pencil
     var drawStrokeWidth by remember { mutableFloatStateOf(6f) }
@@ -2581,8 +3002,8 @@ fun EditorScreen(
     var addWordX by remember { mutableFloatStateOf(0f) }
     var addWordY by remember { mutableFloatStateOf(0f) }
     var addWordTextDraft by remember { mutableStateOf("") }
-    var addWordFontFamily by remember { mutableStateOf("sans-serif") }
-    var editWordFontFamily by remember { mutableStateOf("sans-serif") }
+    var addWordFontFamily by remember { mutableStateOf("arial") }
+    var editWordFontFamily by remember { mutableStateOf("arial") }
     var addWordFontSize by remember { mutableFloatStateOf(14f) }
     var editWordFontSize by remember { mutableFloatStateOf(14f) }
     var addWordColorHex by remember { mutableStateOf("#000000") }
@@ -2608,6 +3029,7 @@ fun EditorScreen(
 
     val currentDrawings = remember(activePage) { mutableStateListOf<DrawingDef>().colorsSync(activePage.drawings) }
     val currentTextAnns = remember(activePage) { mutableStateListOf<TextAnnotationDef>().annotationSync(activePage.textAnnotations) }
+    val currentSignatures = remember(activePage) { mutableStateListOf<SignatureOverlayDef>().signatureSync(activePage.signatures) }
 
     // Pan, Zoom, Rotate and Aspect orientation states
     var activeDraggingId by remember { mutableStateOf<String?>(null) }
@@ -2651,80 +3073,76 @@ fun EditorScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        text = activeDoc.title,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                },
-                navigationIcon = {
-                    IconButton(
-                        onClick = {
-                            if (isModified) {
-                                showCloseConfirmDialog = true
-                            } else {
+            Column(
+                modifier = Modifier
+                    .background(MaterialTheme.colorScheme.surface)
+                    .fillMaxWidth()
+            ) {
+                CenterAlignedTopAppBar(
+                    title = {
+                        Text(
+                            text = activeDoc.title,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(
+                            onClick = {
+                                if (isModified) {
+                                    showCloseConfirmDialog = true
+                                } else {
+                                    viewModel.navigateTo(Screen.Dashboard)
+                                }
+                            }
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Dashboard")
+                        }
+                    },
+                    actions = {
+                        // Smart Word Auto-Detector Trigger
+                        IconButton(
+                            onClick = { viewModel.autoDetectPageWords() }
+                        ) {
+                            Icon(Icons.Default.DocumentScanner, "Auto-Detect Words", tint = MaterialTheme.colorScheme.tertiary)
+                        }
+                        // Page Workbench Toggle Button
+                        IconButton(
+                            onClick = { showPageWorkbench = !showPageWorkbench }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ViewAgenda,
+                                contentDescription = "Toggle Page Workbench",
+                                tint = if (showPageWorkbench) MaterialTheme.colorScheme.secondary else Color.Gray
+                            )
+                        }
+
+                        Button(
+                            onClick = {
+                                viewModel.saveEditorChanges()
+                                viewModel.navigateTo(Screen.Dashboard)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                        ) {
+                            Icon(Icons.Default.Save, "Save changes", modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Save", fontSize = 12.sp)
+                        }
+                        IconButton(
+                            onClick = {
+                                viewModel.saveEditorChanges()
+                                sharePdfFile(context, activeDoc)
                                 viewModel.navigateTo(Screen.Dashboard)
                             }
+                        ) {
+                            Icon(Icons.Default.Share, "Send PDF", tint = MaterialTheme.colorScheme.primary)
                         }
-                    ) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Dashboard")
                     }
-                },
-                actions = {
-                    // Smart Word Auto-Detector Trigger
-                    IconButton(
-                        onClick = { viewModel.autoDetectPageWords() }
-                    ) {
-                        Icon(Icons.Default.DocumentScanner, "Auto-Detect Words", tint = MaterialTheme.colorScheme.tertiary)
-                    }
-                    // OCR recognition trigger!
-                    IconButton(
-                        onClick = { viewModel.runOcrOnActivePage() }
-                    ) {
-                        Icon(Icons.Default.Analytics, "Run Gemini OCR Analysis", tint = MaterialTheme.colorScheme.primary)
-                    }
-                    // Page editing toggle button
-                    IconButton(
-                        onClick = { showPageEditorControls = !showPageEditorControls }
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Layers,
-                            contentDescription = "Toggle Page Editor Controls",
-                            tint = if (showPageEditorControls) MaterialTheme.colorScheme.primary else Color.Gray
-                        )
-                    }
-                    // Page Workbench Toggle Button
-                    IconButton(
-                        onClick = { showPageWorkbench = !showPageWorkbench }
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.ViewAgenda,
-                            contentDescription = "Toggle Page Workbench",
-                            tint = if (showPageWorkbench) MaterialTheme.colorScheme.secondary else Color.Gray
-                        )
-                    }
-                    Button(
-                        onClick = { viewModel.saveEditorChanges() },
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-                    ) {
-                        Icon(Icons.Default.Save, "Save changes", modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Save PDF", fontSize = 12.sp)
-                    }
-                    IconButton(
-                        onClick = {
-                            viewModel.saveEditorChanges()
-                            sharePdfFile(context, activeDoc)
-                        }
-                    ) {
-                        Icon(Icons.Default.Share, "Send PDF", tint = MaterialTheme.colorScheme.primary)
-                    }
-                }
-            )
+                )
+            }
         },
         bottomBar = {
             Column(
@@ -2732,17 +3150,6 @@ fun EditorScreen(
                     .fillMaxWidth()
                     .background(MaterialTheme.colorScheme.surface)
             ) {
-                if (annotationMode == "draw") {
-                    DrawingSettingsToolbar(
-                        drawColorHex = drawColorHex,
-                        onColorSelected = { drawColorHex = it },
-                        drawStrokeWidth = drawStrokeWidth,
-                        onStrokeWidthChanged = { drawStrokeWidth = it },
-                        drawPenType = drawPenType,
-                        onPenTypeChanged = { drawPenType = it }
-                    )
-                }
-
                 // Interactive annotations toolbar
                 Surface(
                     modifier = Modifier
@@ -2766,15 +3173,7 @@ fun EditorScreen(
                             Icon(Icons.Default.TouchApp, "Gesture Scroll", tint = if (annotationMode == "none" && !isAddingTextMode) MaterialTheme.colorScheme.primary else Color.Gray)
                         }
 
-                        // Brush / Red marker annotator overlay
-                        IconButton(
-                            onClick = { annotationMode = "draw" },
-                            colors = IconButtonDefaults.iconButtonColors(
-                                containerColor = if (annotationMode == "draw") MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else Color.Transparent
-                            )
-                        ) {
-                            Icon(Icons.Default.Gesture, "Red Paint Ink", tint = if (annotationMode == "draw") MaterialTheme.colorScheme.primary else Color.Gray)
-                        }
+
 
                         // Text Marker markup
                         IconButton(
@@ -2796,14 +3195,79 @@ fun EditorScreen(
                             Icon(Icons.Default.Draw, "Insert Signature Profile", tint = MaterialTheme.colorScheme.primary)
                         }
 
-                        // Undo or reset page markings
-                        IconButton(
-                            onClick = {
-                                viewModel.editActivePageDrawings(emptyList())
-                                viewModel.editActivePageAnnotations(emptyList())
+                        // Page filter function menu
+                        Box {
+                            IconButton(
+                                onClick = { showFilterDropdown = true }
+                            ) {
+                                Icon(
+                                    Icons.Default.FilterAlt,
+                                    "Apply Image Filter",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
                             }
-                        ) {
-                            Icon(Icons.Default.Refresh, "Reset Page Markings", tint = Color.Red.copy(alpha = 0.7f))
+                            
+                            DropdownMenu(
+                                expanded = showFilterDropdown,
+                                onDismissRequest = { showFilterDropdown = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Original") },
+                                    onClick = {
+                                        viewModel.editActivePageFilter("original")
+                                        showFilterDropdown = false
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            Icons.Default.Image,
+                                            contentDescription = null,
+                                            tint = if (activePage.filterType == "original") MaterialTheme.colorScheme.primary else Color.Gray
+                                        )
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Black & White") },
+                                    onClick = {
+                                        viewModel.editActivePageFilter("black_white")
+                                        showFilterDropdown = false
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            Icons.Default.Contrast,
+                                            contentDescription = null,
+                                            tint = if (activePage.filterType == "black_white") MaterialTheme.colorScheme.primary else Color.Gray
+                                        )
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Grayscale") },
+                                    onClick = {
+                                        viewModel.editActivePageFilter("grayscale")
+                                        showFilterDropdown = false
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            Icons.Default.Lens,
+                                            contentDescription = null,
+                                            tint = if (activePage.filterType == "grayscale") MaterialTheme.colorScheme.primary else Color.Gray
+                                        )
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Enhance Docs") },
+                                    onClick = {
+                                        viewModel.editActivePageFilter("enhance")
+                                        showFilterDropdown = false
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            Icons.Default.AutoAwesome,
+                                            contentDescription = null,
+                                            tint = if (activePage.filterType == "enhance") MaterialTheme.colorScheme.primary else Color.Gray
+                                        )
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -3205,7 +3669,18 @@ fun EditorScreen(
                     if (activePage.backgroundScanPath != null) {
                         val file = File(activePage.backgroundScanPath)
                         if (file.exists()) {
-                            val bitmap = remember(activePage.id) { AndroidBitmapLoader.load(file.absolutePath) }
+                            val bitmap = remember(activePage.id, activePage.filterType) {
+                                val base = AndroidBitmapLoader.load(file.absolutePath)
+                                if (base != null && activePage.filterType != "original") {
+                                    val filtered = viewModel.applyFilterToBitmap(base, activePage.filterType)
+                                    if (filtered != base) {
+                                        base.recycle()
+                                    }
+                                    filtered
+                                } else {
+                                    base
+                                }
+                            }
                             if (bitmap != null) {
                                 Image(
                                     bitmap = bitmap.asImageBitmap(),
@@ -3330,23 +3805,25 @@ fun EditorScreen(
                                 y = heightDp * txtAnn.y
                             )
                             .offset { IntOffset(itemOffsetX.roundToInt(), itemOffsetY.roundToInt()) }
-                            .pointerInput(txtAnn.id) {
-                                awaitPointerEventScope {
-                                    while (true) {
-                                        awaitFirstDown(requireUnconsumed = false)
-                                        activeDraggingId = txtAnn.id
-                                    }
-                                }
-                            }
+                            .zIndex(if (activeDraggingId == txtAnn.id) 100f else 2f)
                             .pointerInput(txtAnn.id) {
                                 detectDragGestures(
                                     onDragStart = {
                                         activeDraggingId = txtAnn.id
                                     },
                                     onDragEnd = {
-                                        // Update state with updated coordinates (safely bounding within sheet canvas)
-                                        val newX = (txtAnn.x + (itemOffsetX / widthPx)).coerceIn(0f, 0.95f)
-                                        val newY = (txtAnn.y + (itemOffsetY / heightPx)).coerceIn(0f, 0.95f)
+                                        // Update state with updated coordinates (safely bounding within sheet canvas on a minimized 0.001f alignment grid)
+                                        val rawX = (txtAnn.x + (itemOffsetX / widthPx))
+                                        val rawY = (txtAnn.y + (itemOffsetY / heightPx))
+                                        val newX = ((rawX / 0.001f).roundToInt() * 0.001f).coerceIn(0f, 0.95f)
+                                        val newY = ((rawY / 0.001f).roundToInt() * 0.001f).coerceIn(0f, 0.95f)
+                                        
+                                        // Update local memory list directly so the UI updates instantly and repeatedly without any lag
+                                        val idxToUpdate = currentTextAnns.indexOfFirst { it.id == txtAnn.id }
+                                        if (idxToUpdate != -1) {
+                                            currentTextAnns[idxToUpdate] = txtAnn.copy(x = newX, y = newY)
+                                        }
+                                        
                                         val updatedAnns = currentTextAnns.map {
                                             if (it.id == txtAnn.id) it.copy(x = newX, y = newY) else it
                                         }
@@ -3367,33 +3844,25 @@ fun EditorScreen(
                                     }
                                 )
                             }
-                            .clickable {
-                                selectedWordToEdit = txtAnn
-                                editWordTextDraft = txtAnn.text
-                                editWordFontFamily = txtAnn.fontName
-                                editWordFontSize = txtAnn.fontSize
-                                editWordColorHex = txtAnn.colorHex
-                                editWordBgColorHex = txtAnn.bgColorHex
-                                editWordHasOutline = txtAnn.hasOutline
-                                editWordHasUnderline = txtAnn.hasUnderline
-                                editWordOutlineColorHex = txtAnn.outlineColorHex
-                                editWordIsBold = txtAnn.isBold
-                                editWordAlignment = txtAnn.alignment
-                                editWordIsPowerOf = txtAnn.isPowerOf
-                                editWordIsItalic = txtAnn.isItalic
-                                editWordHasStrikeThrough = txtAnn.hasStrikeThrough
-                                showEditWordDialog = true
+                            .pointerInput(txtAnn.id) {
+                                detectTapGestures {
+                                    selectedWordToEdit = txtAnn
+                                    editWordTextDraft = txtAnn.text
+                                    editWordFontFamily = txtAnn.fontName
+                                    editWordFontSize = txtAnn.fontSize
+                                    editWordColorHex = txtAnn.colorHex
+                                    editWordBgColorHex = txtAnn.bgColorHex
+                                    editWordHasOutline = txtAnn.hasOutline
+                                    editWordHasUnderline = txtAnn.hasUnderline
+                                    editWordOutlineColorHex = txtAnn.outlineColorHex
+                                    editWordIsBold = txtAnn.isBold
+                                    editWordAlignment = txtAnn.alignment
+                                    editWordIsPowerOf = txtAnn.isPowerOf
+                                    editWordIsItalic = txtAnn.isItalic
+                                    editWordHasStrikeThrough = txtAnn.hasStrikeThrough
+                                    showEditWordDialog = true
+                                }
                             }
-                            .background(backgroundParsedColor, RoundedCornerShape(4.dp))
-                            .then(
-                                if (txtAnn.hasOutline) {
-                                    Modifier.border(
-                                        width = 2.dp,
-                                        color = Color(try { android.graphics.Color.parseColor(txtAnn.outlineColorHex) } catch (e: Exception) { android.graphics.Color.BLACK }),
-                                        shape = RoundedCornerShape(4.dp)
-                                    )
-                                } else Modifier
-                            )
                             // Align the sticker box based on text alignment to match PDF rendering math perfectly!
                             .layout { measurable, constraints ->
                                 val placeable = measurable.measure(constraints)
@@ -3406,11 +3875,21 @@ fun EditorScreen(
                                     placeable.placeRelative(xShift, 0)
                                 }
                             }
-                            .padding(horizontal = 6.dp, vertical = 4.dp)
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        // Inner content Box with background and border outline which represents the real PDF bounds!
+                        Box(
+                            modifier = Modifier
+                                .background(backgroundParsedColor, RoundedCornerShape(4.dp))
+                                .then(
+                                    if (txtAnn.hasOutline) {
+                                        Modifier.border(
+                                            width = 2.dp,
+                                            color = Color(try { android.graphics.Color.parseColor(txtAnn.outlineColorHex) } catch (e: Exception) { android.graphics.Color.BLACK }),
+                                            shape = RoundedCornerShape(4.dp)
+                                        )
+                                    } else Modifier
+                                )
+                                .padding(horizontal = 6.dp, vertical = 4.dp)
                         ) {
                             Text(
                                 text = txtAnn.text,
@@ -3436,60 +3915,54 @@ fun EditorScreen(
                                     baselineShift = if (txtAnn.isPowerOf) androidx.compose.ui.text.style.BaselineShift.Superscript else null
                                 )
                             )
+                        }
 
-                            // Clean visual font resize handle inside text box overlays!
-                            Box(
-                                modifier = Modifier
-                                    .size(16.dp)
-                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.7f), CircleShape)
-                                    .pointerInput(txtAnn.id) {
-                                        awaitPointerEventScope {
-                                            while (true) {
-                                                awaitFirstDown(requireUnconsumed = false)
-                                                activeDraggingId = "${txtAnn.id}_resize"
+                        // Drag resize/size control helper icon overlay positioned outside the main PDF bounding box
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .offset(x = 8.dp, y = 8.dp)
+                                .size(18.dp)
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.85f), CircleShape)
+                                .pointerInput(txtAnn.id) {
+                                    detectDragGestures(
+                                        onDragStart = {
+                                            activeDraggingId = "${txtAnn.id}_resize"
+                                        },
+                                        onDragEnd = {
+                                            val finalFontSize = (txtAnn.fontSize + fontSizeDelta).coerceIn(8f, 120f)
+                                            val updatedAnns = currentTextAnns.map {
+                                                if (it.id == txtAnn.id) it.copy(fontSize = finalFontSize) else it
                                             }
+                                            viewModel.editActivePageAnnotations(updatedAnns)
+                                            fontSizeDelta = 0f
+                                            activeDraggingId = null
+                                        },
+                                        onDragCancel = {
+                                            fontSizeDelta = 0f
+                                            activeDraggingId = null
+                                        },
+                                        onDrag = { change, dragAmount ->
+                                            change.consume()
+                                            fontSizeDelta += (dragAmount.x / scale) * 0.15f
                                         }
-                                    }
-                                    .pointerInput(txtAnn.id) {
-                                        detectDragGestures(
-                                            onDragStart = {
-                                                activeDraggingId = "${txtAnn.id}_resize"
-                                            },
-                                            onDragEnd = {
-                                                val finalFontSize = (txtAnn.fontSize + fontSizeDelta).coerceIn(8f, 120f)
-                                                val updatedAnns = currentTextAnns.map {
-                                                    if (it.id == txtAnn.id) it.copy(fontSize = finalFontSize) else it
-                                                }
-                                                viewModel.editActivePageAnnotations(updatedAnns)
-                                                fontSizeDelta = 0f
-                                                activeDraggingId = null
-                                            },
-                                            onDragCancel = {
-                                                fontSizeDelta = 0f
-                                                activeDraggingId = null
-                                            },
-                                            onDrag = { change, dragAmount ->
-                                                change.consume()
-                                                fontSizeDelta += (dragAmount.x / scale) * 0.15f
-                                            }
-                                        )
-                                    }
-                                    .padding(2.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    Icons.Default.Crop,
-                                    contentDescription = "Resize Font",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(10.dp)
-                                )
-                            }
+                                    )
+                                }
+                                .padding(2.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Default.Crop,
+                                contentDescription = "Resize Font",
+                                tint = Color.White,
+                                modifier = Modifier.size(10.dp)
+                            )
                         }
                     }
                 }
 
                 // Render Placeable Signature Overlays
-                activePage.signatures.forEach { sigOverlay ->
+                currentSignatures.forEach { sigOverlay ->
                     val resolvedSigProfile = state.signatures.find { it.id == sigOverlay.signatureProfileId }
                     var signOffsetX by remember(sigOverlay.id) { mutableFloatStateOf(0f) }
                     var signOffsetY by remember(sigOverlay.id) { mutableFloatStateOf(0f) }
@@ -3505,6 +3978,7 @@ fun EditorScreen(
                             .offset { IntOffset(signOffsetX.roundToInt(), signOffsetY.roundToInt()) }
                             .width((sigOverlay.width + signWidthDelta).coerceIn(60f, 400f).dp)
                             .height((sigOverlay.height + signHeightDelta).coerceIn(30f, 250f).dp)
+                            .zIndex(if (activeDraggingId == sigOverlay.id || activeDraggingId == "${sigOverlay.id}_resize") 100f else 2f)
                             .pointerInput(sigOverlay.id) {
                                 awaitPointerEventScope {
                                     while (true) {
@@ -3519,12 +3993,21 @@ fun EditorScreen(
                                         activeDraggingId = sigOverlay.id
                                     },
                                     onDragEnd = {
-                                        // Update state coordinates (safely bounding within sheet canvas)
-                                        val reX = (sigOverlay.x + (signOffsetX / widthPx)).coerceIn(0f, 0.95f)
-                                        val reY = (sigOverlay.y + (signOffsetY / heightPx)).coerceIn(0f, 0.95f)
+                                        // Update state coordinates (safely bounding within sheet canvas on a minimized 0.001f alignment grid)
+                                        val rawX = (sigOverlay.x + (signOffsetX / widthPx))
+                                        val rawY = (sigOverlay.y + (signOffsetY / heightPx))
+                                        val reX = ((rawX / 0.001f).roundToInt() * 0.001f).coerceIn(0f, 0.95f)
+                                        val reY = ((rawY / 0.001f).roundToInt() * 0.001f).coerceIn(0f, 0.95f)
                                         
-                                        val remainingSignatures = activePage.signatures.filterNot { it.id == sigOverlay.id }
-                                        val updatedSignatures = remainingSignatures + sigOverlay.copy(x = reX, y = reY)
+                                        // Update local memory list directly so the UI updates instantly and repeatedly without any lag
+                                        val idxToUpdate = currentSignatures.indexOfFirst { it.id == sigOverlay.id }
+                                        if (idxToUpdate != -1) {
+                                            currentSignatures[idxToUpdate] = sigOverlay.copy(x = reX, y = reY)
+                                        }
+                                        
+                                        val updatedSignatures = currentSignatures.map {
+                                            if (it.id == sigOverlay.id) it.copy(x = reX, y = reY) else it
+                                        }
                                         viewModel.editActivePageSignatures(updatedSignatures)
                                         
                                         signOffsetX = 0f
@@ -3590,23 +4073,32 @@ fun EditorScreen(
                             }
                         }
 
-                        // Remove overlay badge trigger
-                        IconButton(
-                            onClick = { viewModel.removeSignatureOverlay(sigOverlay.id) },
+                        // Remove overlay badge trigger: small, elegant, offset slightly outside the border, and fully in front!
+                        Box(
                             modifier = Modifier
                                 .align(Alignment.TopEnd)
-                                .size(24.dp)
+                                .offset(x = 2.dp, y = (-2).dp)
+                                .size(18.dp)
                                 .background(Color.Red, CircleShape)
+                                .clickable { viewModel.removeSignatureOverlay(sigOverlay.id) }
+                                .zIndex(300f),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Default.Close, contentDescription = "Remove", tint = Color.White, modifier = Modifier.size(12.dp))
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Remove",
+                                tint = Color.White,
+                                modifier = Modifier.size(10.dp)
+                            )
                         }
 
-                        // Resize overlay handle badge at bottom-right corner of Box
+                        // Resize overlay handle badge at bottom-right corner of Box: small, elegant, offset slightly outside, and fully in front!
                         Box(
                             modifier = Modifier
                                 .align(Alignment.BottomEnd)
-                                .size(24.dp)
-                                .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(topStart = 8.dp))
+                                .offset(x = 2.dp, y = 2.dp)
+                                .size(18.dp)
+                                .background(MaterialTheme.colorScheme.primary, CircleShape)
                                 .pointerInput(sigOverlay.id) {
                                     awaitPointerEventScope {
                                         while (true) {
@@ -3625,8 +4117,14 @@ fun EditorScreen(
                                             val finalW = (sigOverlay.width + signWidthDelta).coerceIn(60f, 400f)
                                             val finalH = finalW / ratio
                                             
-                                            val remainingSignatures = activePage.signatures.filterNot { it.id == sigOverlay.id }
-                                            val updatedSignatures = remainingSignatures + sigOverlay.copy(width = finalW, height = finalH)
+                                            val idxToUpdate = currentSignatures.indexOfFirst { it.id == sigOverlay.id }
+                                            if (idxToUpdate != -1) {
+                                                currentSignatures[idxToUpdate] = sigOverlay.copy(width = finalW, height = finalH)
+                                            }
+                                            
+                                            val updatedSignatures = currentSignatures.map {
+                                                if (it.id == sigOverlay.id) it.copy(width = finalW, height = finalH) else it
+                                            }
                                             viewModel.editActivePageSignatures(updatedSignatures)
                                             
                                             signWidthDelta = 0f
@@ -3648,14 +4146,15 @@ fun EditorScreen(
                                             signHeightDelta = targetH - sigOverlay.height
                                         }
                                     )
-                                },
+                                }
+                                .zIndex(300f),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Default.OpenInFull,
                                 contentDescription = "Resize Signature",
                                 tint = Color.White,
-                                modifier = Modifier.size(12.dp)
+                                modifier = Modifier.size(10.dp)
                             )
                         }
                     }
@@ -3684,10 +4183,28 @@ fun EditorScreen(
                                             val spawnX = (0.5f - (offsetX / (scale * pageMeasuredWidthPx.coerceAtLeast(1f)))).coerceIn(0.05f, 0.85f)
                                             val spawnY = (0.5f - (offsetY / (scale * pageMeasuredHeightPx.coerceAtLeast(1f)))).coerceIn(0.05f, 0.85f)
                                             
+                                            var finalWidth = 110f
+                                            var finalHeight = 55f
+                                            if (sig.pathDataJson.startsWith("image:")) {
+                                                try {
+                                                    val path = sig.pathDataJson.removePrefix("image:")
+                                                    val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                                                    android.graphics.BitmapFactory.decodeFile(path, opts)
+                                                    if (opts.outWidth > 0 && opts.outHeight > 0) {
+                                                        finalWidth = 110f
+                                                        finalHeight = finalWidth / (opts.outWidth.toFloat() / opts.outHeight.toFloat())
+                                                    }
+                                                } catch (e: Exception) {
+                                                    e.printStackTrace()
+                                                }
+                                            }
+
                                             val overlay = SignatureOverlayDef(
                                                 id = UUID.randomUUID().toString(),
                                                 x = spawnX,
                                                 y = spawnY,
+                                                width = finalWidth,
+                                                height = finalHeight,
                                                 signatureProfileId = sig.id
                                             )
                                             viewModel.addSignatureOverlay(overlay)
@@ -3738,18 +4255,76 @@ fun EditorScreen(
                             modifier = Modifier.fillMaxWidth()
                         )
 
+                        // Live Interactive Design Preview Card
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f)
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Text(
+                                    text = "Preview Text Styling",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(bottom = 6.dp)
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(
+                                            if (addWordBgColorHex.lowercase() == "transparent" || addWordBgColorHex.isBlank()) {
+                                                Color.Transparent
+                                            } else {
+                                                Color(android.graphics.Color.parseColor(addWordBgColorHex))
+                                            },
+                                            RoundedCornerShape(4.dp)
+                                        )
+                                        .border(
+                                            width = if (addWordBgColorHex.lowercase() == "transparent") 1.dp else 0.dp,
+                                            color = if (addWordBgColorHex.lowercase() == "transparent") Color.LightGray else Color.Transparent,
+                                            shape = RoundedCornerShape(4.dp)
+                                        )
+                                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                                ) {
+                                    Text(
+                                        text = if (addWordTextDraft.isNotBlank()) addWordTextDraft else "Sample Text Layer Preview",
+                                        fontSize = addWordFontSize.sp,
+                                        fontFamily = getFontFamily(addWordFontFamily),
+                                        fontWeight = if (addWordIsBold) FontWeight.Bold else FontWeight.Normal,
+                                        fontStyle = if (addWordIsItalic) FontStyle.Italic else FontStyle.Normal,
+                                        color = Color(android.graphics.Color.parseColor(addWordColorHex)),
+                                        modifier = Modifier.fillMaxWidth(),
+                                        textAlign = when (addWordAlignment.lowercase()) {
+                                            "center" -> TextAlign.Center
+                                            "right" -> TextAlign.End
+                                            else -> TextAlign.Start
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
                         Text("Select Font Family:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             listOf(
-                                Pair("sans-serif", "Sans"),
-                                Pair("serif", "Serif"),
-                                Pair("monospace", "Mono"),
-                                Pair("cursive", "Cursive")
+                                Pair("arial", "Arial"),
+                                Pair("calibri", "Calibri"),
+                                Pair("tahoma", "Tahoma"),
+                                Pair("times new roman", "Times NR")
                             ).forEach { (fontKey, fontVal) ->
-                                val isSelected = addWordFontFamily == fontKey
+                                val isSelected = addWordFontFamily.lowercase() == fontKey.lowercase()
                                 OutlinedButton(
                                     onClick = { addWordFontFamily = fontKey },
                                     modifier = Modifier.weight(1f).height(36.dp),
@@ -3808,7 +4383,7 @@ fun EditorScreen(
                                 "#10AC84" to Color(0xFF10AC84),
                                 "#F5A623" to Color(0xFFF5A623)
                             ).forEach { (colorKey, colorVal) ->
-                                val isSelected = addWordColorHex == colorKey
+                                val isSelected = addWordColorHex.lowercase() == colorKey.lowercase()
                                 Box(
                                     modifier = Modifier
                                         .size(32.dp)
@@ -3836,7 +4411,7 @@ fun EditorScreen(
                                 "#D4F7D3" to Color(0xFFD4F7D3), // Soft Green
                                 "#FFD2D2" to Color(0xFFFFD2D2)  // Soft Pink
                             ).forEach { (colorKey, colorVal) ->
-                                val isSelected = addWordBgColorHex == colorKey
+                                val isSelected = addWordBgColorHex.lowercase() == colorKey.lowercase()
                                 Box(
                                     modifier = Modifier
                                         .size(32.dp)
@@ -4006,7 +4581,7 @@ fun EditorScreen(
                                     "#10AC84" to Color(0xFF10AC84),
                                     "#F5A623" to Color(0xFFF5A623)
                                 ).forEach { (colorKey, colorVal) ->
-                                    val isSelected = addWordOutlineColorHex == colorKey
+                                    val isSelected = addWordOutlineColorHex.lowercase() == colorKey.lowercase()
                                     Box(
                                         modifier = Modifier
                                             .size(28.dp)
@@ -4032,7 +4607,7 @@ fun EditorScreen(
                                 "center" to Icons.Default.FormatAlignCenter,
                                 "right" to Icons.Default.FormatAlignRight
                             ).forEach { (alignKey, alignIcon) ->
-                                val isSelected = addWordAlignment == alignKey
+                                val isSelected = addWordAlignment.lowercase() == alignKey.lowercase()
                                 IconButton(
                                     onClick = { addWordAlignment = alignKey },
                                     modifier = Modifier
@@ -4081,8 +4656,8 @@ fun EditorScreen(
                                 isItalic = addWordIsItalic,
                                 hasStrikeThrough = addWordHasStrikeThrough
                             )
-                            val updated = currentTextAnns + sticker
-                            viewModel.editActivePageAnnotations(updated)
+                            currentTextAnns.add(sticker)
+                            viewModel.editActivePageAnnotations(currentTextAnns.toList())
                             showAddWordDialog = false
                             isAddingTextMode = false
                         }
@@ -4120,18 +4695,76 @@ fun EditorScreen(
                             modifier = Modifier.fillMaxWidth()
                         )
 
+                        // Live Interactive Design Preview Card
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f)
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Text(
+                                    text = "Preview Text Styling",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(bottom = 6.dp)
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(
+                                            if (editWordBgColorHex.lowercase() == "transparent" || editWordBgColorHex.isBlank()) {
+                                                Color.Transparent
+                                            } else {
+                                                Color(android.graphics.Color.parseColor(editWordBgColorHex))
+                                            },
+                                            RoundedCornerShape(4.dp)
+                                        )
+                                        .border(
+                                            width = if (editWordBgColorHex.lowercase() == "transparent") 1.dp else 0.dp,
+                                            color = if (editWordBgColorHex.lowercase() == "transparent") Color.LightGray else Color.Transparent,
+                                            shape = RoundedCornerShape(4.dp)
+                                        )
+                                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                                ) {
+                                    Text(
+                                        text = if (editWordTextDraft.isNotBlank()) editWordTextDraft else "Sample Text Layer Preview",
+                                        fontSize = editWordFontSize.sp,
+                                        fontFamily = getFontFamily(editWordFontFamily),
+                                        fontWeight = if (editWordIsBold) FontWeight.Bold else FontWeight.Normal,
+                                        fontStyle = if (editWordIsItalic) FontStyle.Italic else FontStyle.Normal,
+                                        color = Color(android.graphics.Color.parseColor(editWordColorHex)),
+                                        modifier = Modifier.fillMaxWidth(),
+                                        textAlign = when (editWordAlignment.lowercase()) {
+                                            "center" -> TextAlign.Center
+                                            "right" -> TextAlign.End
+                                            else -> TextAlign.Start
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
                         Text("Select Font Family:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             listOf(
-                                Pair("sans-serif", "Sans"),
-                                Pair("serif", "Serif"),
-                                Pair("monospace", "Mono"),
-                                Pair("cursive", "Cursive")
+                                Pair("arial", "Arial"),
+                                Pair("calibri", "Calibri"),
+                                Pair("tahoma", "Tahoma"),
+                                Pair("times new roman", "Times NR")
                             ).forEach { (fontKey, fontVal) ->
-                                val isSelected = editWordFontFamily == fontKey
+                                val isSelected = editWordFontFamily.lowercase() == fontKey.lowercase()
                                 OutlinedButton(
                                     onClick = { editWordFontFamily = fontKey },
                                     modifier = Modifier.weight(1f).height(36.dp),
@@ -4190,7 +4823,7 @@ fun EditorScreen(
                                 "#10AC84" to Color(0xFF10AC84),
                                 "#F5A623" to Color(0xFFF5A623)
                             ).forEach { (colorKey, colorVal) ->
-                                val isSelected = editWordColorHex == colorKey
+                                val isSelected = editWordColorHex.lowercase() == colorKey.lowercase()
                                 Box(
                                     modifier = Modifier
                                         .size(32.dp)
@@ -4218,7 +4851,7 @@ fun EditorScreen(
                                 "#D4F7D3" to Color(0xFFD4F7D3), // Soft Green
                                 "#FFD2D2" to Color(0xFFFFD2D2)  // Soft Pink
                             ).forEach { (colorKey, colorVal) ->
-                                val isSelected = editWordBgColorHex == colorKey
+                                val isSelected = editWordBgColorHex.lowercase() == colorKey.lowercase()
                                 Box(
                                     modifier = Modifier
                                         .size(32.dp)
@@ -4388,7 +5021,7 @@ fun EditorScreen(
                                     "#10AC84" to Color(0xFF10AC84),
                                     "#F5A623" to Color(0xFFF5A623)
                                 ).forEach { (colorKey, colorVal) ->
-                                    val isSelected = editWordOutlineColorHex == colorKey
+                                    val isSelected = editWordOutlineColorHex.lowercase() == colorKey.lowercase()
                                     Box(
                                         modifier = Modifier
                                             .size(28.dp)
@@ -4414,7 +5047,7 @@ fun EditorScreen(
                                 "center" to Icons.Default.FormatAlignCenter,
                                 "right" to Icons.Default.FormatAlignRight
                             ).forEach { (alignKey, alignIcon) ->
-                                val isSelected = editWordAlignment == alignKey
+                                val isSelected = editWordAlignment.lowercase() == alignKey.lowercase()
                                 IconButton(
                                     onClick = { editWordAlignment = alignKey },
                                     modifier = Modifier
@@ -4445,27 +5078,27 @@ fun EditorScreen(
                     TextButton(
                         onClick = {
                             val target = selectedWordToEdit ?: return@TextButton
-                            val updated = currentTextAnns.map {
-                                if (it.id == target.id) {
-                                    it.copy(
-                                        text = editWordTextDraft,
-                                        fontSize = editWordFontSize,
-                                        colorHex = editWordColorHex,
-                                        fontName = editWordFontFamily,
-                                        bgColorHex = editWordBgColorHex,
-                                        hasOutline = editWordHasOutline,
-                                        hasUnderline = editWordHasUnderline,
-                                        outlineColorHex = editWordOutlineColorHex,
-                                        hasDoubleUnderline = false,
-                                        isBold = editWordIsBold,
-                                        alignment = editWordAlignment,
-                                        isPowerOf = editWordIsPowerOf,
-                                        isItalic = editWordIsItalic,
-                                        hasStrikeThrough = editWordHasStrikeThrough
-                                    )
-                                } else it
+                            val updatedItem = target.copy(
+                                text = editWordTextDraft,
+                                fontSize = editWordFontSize,
+                                colorHex = editWordColorHex,
+                                fontName = editWordFontFamily,
+                                bgColorHex = editWordBgColorHex,
+                                hasOutline = editWordHasOutline,
+                                hasUnderline = editWordHasUnderline,
+                                outlineColorHex = editWordOutlineColorHex,
+                                hasDoubleUnderline = false,
+                                isBold = editWordIsBold,
+                                alignment = editWordAlignment,
+                                isPowerOf = editWordIsPowerOf,
+                                isItalic = editWordIsItalic,
+                                hasStrikeThrough = editWordHasStrikeThrough
+                            )
+                            val idx = currentTextAnns.indexOfFirst { it.id == target.id }
+                            if (idx != -1) {
+                                currentTextAnns[idx] = updatedItem
                             }
-                            viewModel.editActivePageAnnotations(updated)
+                            viewModel.editActivePageAnnotations(currentTextAnns.toList())
                             showEditWordDialog = false
                             selectedWordToEdit = null
                         }
@@ -4478,8 +5111,11 @@ fun EditorScreen(
                         TextButton(
                             onClick = {
                                 val target = selectedWordToEdit ?: return@TextButton
-                                val updated = currentTextAnns.filterNot { it.id == target.id }
-                                viewModel.editActivePageAnnotations(updated)
+                                val idx = currentTextAnns.indexOfFirst { it.id == target.id }
+                                if (idx != -1) {
+                                    currentTextAnns.removeAt(idx)
+                                }
+                                viewModel.editActivePageAnnotations(currentTextAnns.toList())
                                 showEditWordDialog = false
                                 selectedWordToEdit = null
                             },
@@ -4573,6 +5209,11 @@ fun MutableList<DrawingDef>.colorsSync(list: List<DrawingDef>) = apply {
 }
 
 fun MutableList<TextAnnotationDef>.annotationSync(list: List<TextAnnotationDef>) = apply {
+    clear()
+    addAll(list)
+}
+
+fun MutableList<SignatureOverlayDef>.signatureSync(list: List<SignatureOverlayDef>) = apply {
     clear()
     addAll(list)
 }

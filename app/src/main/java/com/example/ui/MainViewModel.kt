@@ -62,6 +62,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val db = AppDatabase.getDatabase(application)
     private val repo = DocumentRepository(db)
 
+    private val undoStack = mutableListOf<DocumentContent>()
+    private val redoStack = mutableListOf<DocumentContent>()
+
+    private fun pushToUndoStack() {
+        val current = _uiState.value.activeDocumentContent
+        undoStack.add(current)
+        redoStack.clear()
+    }
+
     private val _uiState = MutableStateFlow(UiState())
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
 
@@ -135,7 +144,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val newDoc = Document(
                 title = actualTitle,
                 category = when (type) {
-                    "blank", "lined" -> "Blank Note"
+                    "blank" -> "Blank Note"
+                    "lined" -> "Lined Note"
                     "cornell" -> "Cornell Note"
                     else -> "Meeting Minutes"
                 },
@@ -180,6 +190,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val content = DocumentSerializer.fromJson(doc.contentJson)
             val activePageId = content.pages.firstOrNull()?.id ?: ""
             
+            undoStack.clear()
+            redoStack.clear()
+            
             _uiState.update {
                 it.copy(
                     activeDocument = doc,
@@ -191,10 +204,58 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun undo() {
+        if (undoStack.isNotEmpty()) {
+            val current = _uiState.value.activeDocumentContent
+            redoStack.add(current)
+            val previous = undoStack.removeAt(undoStack.size - 1)
+            
+            val updatedActivePageId = if (previous.pages.any { it.id == _uiState.value.activePageId }) {
+                _uiState.value.activePageId
+            } else {
+                previous.pages.firstOrNull()?.id ?: ""
+            }
+            
+            _uiState.update {
+                it.copy(
+                    activeDocumentContent = previous,
+                    activePageId = updatedActivePageId
+                )
+            }
+        }
+    }
+
+    fun redo() {
+        if (redoStack.isNotEmpty()) {
+            val current = _uiState.value.activeDocumentContent
+            undoStack.add(current)
+            val next = redoStack.removeAt(redoStack.size - 1)
+            
+            val updatedActivePageId = if (next.pages.any { it.id == _uiState.value.activePageId }) {
+                _uiState.value.activePageId
+            } else {
+                next.pages.firstOrNull()?.id ?: ""
+            }
+            
+            _uiState.update {
+                it.copy(
+                    activeDocumentContent = next,
+                    activePageId = updatedActivePageId
+                )
+            }
+        }
+    }
+
+    fun canUndo(): Boolean = undoStack.isNotEmpty()
+    fun canRedo(): Boolean = redoStack.isNotEmpty()
+
     fun saveEditorChanges() {
         val activeDoc = _uiState.value.activeDocument ?: return
-        val currentContent = _uiState.value.activeDocumentContent
+        var currentContent = _uiState.value.activeDocumentContent
         viewModelScope.launch {
+            // Merge signature and text annotation layers with the background scan / template image
+            currentContent = mergeLayersForSaving(currentContent)
+
             val json = DocumentSerializer.toJson(currentContent)
             val updatedDoc = activeDoc.copy(
                 contentJson = json,
@@ -217,9 +278,322 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             repo.updateDocument(finalDoc)
-            _uiState.update { it.copy(activeDocument = finalDoc) }
+            _uiState.update { 
+                it.copy(
+                    activeDocument = finalDoc,
+                    activeDocumentContent = currentContent
+                ) 
+            }
             triggerFeedback("Changes flattened & PDF compiled!")
         }
+    }
+
+    private fun mergeLayersForSaving(currentContent: DocumentContent): DocumentContent {
+        val updatedPages = currentContent.pages.map { page ->
+            if (page.textAnnotations.isEmpty() && page.signatures.isEmpty()) {
+                page
+            } else {
+                var curW = 595
+                var curH = 842
+
+                if (page.backgroundScanPath != null) {
+                    val file = File(page.backgroundScanPath)
+                    if (file.exists()) {
+                        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                        BitmapFactory.decodeFile(file.absolutePath, options)
+                        if (options.outWidth > 0 && options.outHeight > 0) {
+                            curW = options.outWidth
+                            curH = options.outHeight
+                        }
+                    }
+                }
+
+                val mergedBitmap = Bitmap.createBitmap(curW, curH, Bitmap.Config.ARGB_8888)
+                val canvas = android.graphics.Canvas(mergedBitmap)
+
+                val bgPaint = android.graphics.Paint().apply {
+                    color = android.graphics.Color.WHITE
+                    style = android.graphics.Paint.Style.FILL
+                }
+                canvas.drawRect(0f, 0f, curW.toFloat(), curH.toFloat(), bgPaint)
+
+                // Draw backgroundScanPath if any
+                if (page.backgroundScanPath != null) {
+                    val file = File(page.backgroundScanPath)
+                    if (file.exists()) {
+                        val bitmap = BitmapFactory.decodeFile(file.absolutePath)
+                        if (bitmap != null) {
+                            val rect = android.graphics.RectF(0f, 0f, curW.toFloat(), curH.toFloat())
+                            canvas.drawBitmap(bitmap, null, rect, android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG))
+                        }
+                    }
+                } else {
+                    // Draw templates
+                    when (page.type.lowercase()) {
+                        "lined" -> {
+                            val marginPaint = android.graphics.Paint().apply {
+                                color = android.graphics.Color.parseColor("#E09090")
+                                strokeWidth = 1.5f
+                                style = android.graphics.Paint.Style.STROKE
+                            }
+                            val linePaint = android.graphics.Paint().apply {
+                                color = android.graphics.Color.parseColor("#C5D3E8")
+                                strokeWidth = 1f
+                                style = android.graphics.Paint.Style.STROKE
+                            }
+                            val leftMargin = curW * 0.15f
+                            canvas.drawLine(leftMargin, 0f, leftMargin, curH.toFloat(), marginPaint)
+                            val lineSpacing = 28f
+                            var currentY = curH * 0.08f
+                            while (currentY < curH * 0.95f) {
+                                canvas.drawLine(0f, currentY, curW.toFloat(), currentY, linePaint)
+                                currentY += lineSpacing
+                            }
+                        }
+                        "cornell" -> {
+                            val boundaryPaint = android.graphics.Paint().apply {
+                                color = android.graphics.Color.parseColor("#80B3D6")
+                                strokeWidth = 2f
+                                style = android.graphics.Paint.Style.STROKE
+                            }
+                            val linePaint = android.graphics.Paint().apply {
+                                color = android.graphics.Color.parseColor("#D5E4F2")
+                                strokeWidth = 1f
+                                style = android.graphics.Paint.Style.STROKE
+                            }
+                            val leftColWidth = curW * 0.30f
+                            val bottomRowHeight = curH * 0.20f
+                            canvas.drawLine(leftColWidth, 0f, leftColWidth, curH - bottomRowHeight, boundaryPaint)
+                            canvas.drawLine(0f, curH - bottomRowHeight, curW.toFloat(), curH - bottomRowHeight, boundaryPaint)
+                            val lineSpacing = 24f
+                            var currentY = curH * 0.05f
+                            while (currentY < curH - bottomRowHeight) {
+                                canvas.drawLine(leftColWidth, currentY, curW.toFloat(), currentY, linePaint)
+                                currentY += lineSpacing
+                            }
+                        }
+                        "meeting" -> {
+                            val titlePaint = android.graphics.Paint().apply {
+                                color = android.graphics.Color.parseColor("#1E3A8A")
+                                textSize = curW * 0.045f
+                                typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+                                isAntiAlias = true
+                            }
+                            val labelPaint = android.graphics.Paint().apply {
+                                color = android.graphics.Color.parseColor("#475569")
+                                textSize = curW * 0.025f
+                                typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+                                isAntiAlias = true
+                            }
+                            val borderPaint = android.graphics.Paint().apply {
+                                color = android.graphics.Color.parseColor("#CBD5E1")
+                                strokeWidth = 1f
+                                style = android.graphics.Paint.Style.STROKE
+                            }
+                            canvas.drawText("MEETING MINUTES", curW * 0.08f, curH * 0.06f, titlePaint)
+                            canvas.drawText("Date: ________________________", curW * 0.08f, curH * 0.09f, labelPaint)
+                            canvas.drawText("Attendees: _________________________________", curW * 0.08f, curH * 0.12f, labelPaint)
+                            val boxTopY = curH * 0.15f
+                            val boxBottomY = curH * 0.90f
+                            canvas.drawRect(curW * 0.08f, boxTopY, curW * 0.92f, boxBottomY, borderPaint)
+                            canvas.drawLine(curW * 0.08f, boxTopY + 30f, curW * 0.92f, boxTopY + 30f, borderPaint)
+                            canvas.drawText("DISCUSSION TOPICS & ACTION ITEMS", curW * 0.10f, boxTopY + 20f, labelPaint)
+                            var lineY = boxTopY + 60f
+                            while (lineY < boxBottomY) {
+                                canvas.drawLine(curW * 0.08f, lineY, curW * 0.92f, lineY, borderPaint)
+                                lineY += 30f
+                            }
+                        }
+                    }
+                }
+
+                // Draw text layer annotations
+                for (textDef in page.textAnnotations) {
+                    val sizeRatio = if (textDef.isPowerOf) 0.72f else 1.0f
+                    val textPaint = android.graphics.Paint().apply {
+                        color = android.graphics.Color.parseColor(textDef.colorHex)
+                        textSize = (textDef.fontSize * sizeRatio) * (curW / 400f)
+                        val fontStyle = if (textDef.isBold) {
+                            if (textDef.isItalic || textDef.fontName.lowercase() == "cursive") android.graphics.Typeface.BOLD_ITALIC else android.graphics.Typeface.BOLD
+                        } else {
+                            if (textDef.isItalic || textDef.fontName.lowercase() == "cursive") android.graphics.Typeface.ITALIC else android.graphics.Typeface.NORMAL
+                        }
+                        val fontTypeface = when (textDef.fontName.lowercase()) {
+                            "serif" -> android.graphics.Typeface.create(android.graphics.Typeface.SERIF, fontStyle)
+                            "monospace" -> android.graphics.Typeface.create(android.graphics.Typeface.MONOSPACE, fontStyle)
+                            "cursive" -> android.graphics.Typeface.create("serif", fontStyle)
+                            else -> android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, fontStyle)
+                        }
+                        typeface = fontTypeface
+                        val paintAlign = when (textDef.alignment.lowercase()) {
+                            "center" -> android.graphics.Paint.Align.CENTER
+                            "right" -> android.graphics.Paint.Align.RIGHT
+                            else -> android.graphics.Paint.Align.LEFT
+                        }
+                        textAlign = paintAlign
+                        isAntiAlias = true
+                    }
+                    
+                    val textWidth = textPaint.measureText(textDef.text)
+                    val baseRx = textDef.x * curW
+                    val rawY = textDef.y * curH
+                    val fontMetricsTemp = android.graphics.Paint().apply { textSize = textDef.fontSize * (curW / 400f) }.fontMetrics
+                    val powerShift = if (textDef.isPowerOf) (fontMetricsTemp.descent - fontMetricsTemp.ascent) * 0.45f else 0f
+                    val ry = rawY - powerShift
+                    val rxStart = when (textPaint.textAlign) {
+                        android.graphics.Paint.Align.CENTER -> baseRx - textWidth / 2f
+                        android.graphics.Paint.Align.RIGHT -> baseRx - textWidth
+                        else -> baseRx
+                    }
+                    val rxEnd = rxStart + textWidth
+
+                    if (textDef.bgColorHex.isNotEmpty() && textDef.bgColorHex.lowercase() != "transparent") {
+                        try {
+                            val fontMetrics = textPaint.fontMetrics
+                            val bgPaint = android.graphics.Paint().apply {
+                                color = android.graphics.Color.parseColor(textDef.bgColorHex)
+                                style = android.graphics.Paint.Style.FILL
+                            }
+                            canvas.drawRect(
+                                rxStart - 6f,
+                                ry + fontMetrics.top - 4f,
+                                rxEnd + 6f,
+                                ry + fontMetrics.bottom + 4f,
+                                bgPaint
+                            )
+                        } catch (e: Exception) { e.printStackTrace() }
+                    }
+
+                    if (textDef.hasOutline) {
+                        try {
+                            val fontMetrics = textPaint.fontMetrics
+                            val outlinePaint = android.graphics.Paint().apply {
+                                color = android.graphics.Color.parseColor(textDef.outlineColorHex)
+                                style = android.graphics.Paint.Style.STROKE
+                                strokeWidth = 2f
+                            }
+                            canvas.drawRect(
+                                rxStart - 6f,
+                                ry + fontMetrics.top - 4f,
+                                rxEnd + 6f,
+                                ry + fontMetrics.bottom + 4f,
+                                outlinePaint
+                            )
+                        } catch (e: Exception) { e.printStackTrace() }
+                    }
+
+                    if (textDef.hasUnderline) {
+                        try {
+                            val underlinePaint = android.graphics.Paint().apply {
+                                color = android.graphics.Color.parseColor(textDef.colorHex)
+                                style = android.graphics.Paint.Style.STROKE
+                                strokeWidth = 1.5f
+                            }
+                            canvas.drawLine(rxStart, ry + 3f, rxEnd, ry + 3f, underlinePaint)
+                        } catch (e: Exception) { e.printStackTrace() }
+                    }
+
+                    if (textDef.hasStrikeThrough) {
+                        try {
+                            val fontMetrics = textPaint.fontMetrics
+                            val middleY = ry + (fontMetrics.ascent + fontMetrics.descent) / 2f
+                            val strikePaint = android.graphics.Paint().apply {
+                                color = android.graphics.Color.parseColor(textDef.colorHex)
+                                style = android.graphics.Paint.Style.STROKE
+                                strokeWidth = 1.5f
+                            }
+                            canvas.drawLine(rxStart, middleY, rxEnd, middleY, strikePaint)
+                        } catch (e: Exception) { e.printStackTrace() }
+                    }
+
+                    canvas.drawText(textDef.text, baseRx, ry, textPaint)
+                }
+
+                // Draw signatures
+                for (sigDef in page.signatures) {
+                    val matchingSig = _uiState.value.signatures.find { it.id == sigDef.signatureProfileId }
+                    if (matchingSig != null) {
+                        val sx = sigDef.x * curW
+                        val sy = sigDef.y * curH
+                        val sw = sigDef.width * (curW / 400f)
+                        val sh = sigDef.height * (curW / 400f)
+
+                        if (matchingSig.pathDataJson.startsWith("image:")) {
+                            try {
+                                val imagePath = matchingSig.pathDataJson.removePrefix("image:")
+                                val sFile = File(imagePath)
+                                if (sFile.exists()) {
+                                    val opts = BitmapFactory.Options().apply {
+                                        inSampleSize = 1
+                                        inScaled = false
+                                    }
+                                    val bitmap = BitmapFactory.decodeFile(sFile.absolutePath, opts)
+                                    if (bitmap != null) {
+                                        val imgW = bitmap.width
+                                        val imgH = bitmap.height
+                                        val imgRatio = if (imgH > 0) imgW.toFloat() / imgH.toFloat() else 1f
+                                        
+                                        // Enforce original resolution ratio when laying over background page
+                                        val actualSh = if (imgRatio > 0f) sw / imgRatio else sh
+                                        val destRect = android.graphics.RectF(sx, sy, sx + sw, sy + actualSh)
+                                        val paint = android.graphics.Paint().apply { 
+                                            isAntiAlias = true
+                                            isFilterBitmap = true
+                                        }
+                                        canvas.drawBitmap(bitmap, null, destRect, paint)
+                                    }
+                                }
+                            } catch (e: Exception) { e.printStackTrace() }
+                        } else {
+                            val points = DocumentSerializer.pointsFromJson(matchingSig.pathDataJson)
+                            if (points.isNotEmpty()) {
+                                val sigPaint = android.graphics.Paint().apply {
+                                    color = android.graphics.Color.parseColor(matchingSig.colorHex)
+                                    style = android.graphics.Paint.Style.STROKE
+                                    strokeJoin = android.graphics.Paint.Join.ROUND
+                                    strokeCap = android.graphics.Paint.Cap.ROUND
+                                    strokeWidth = matchingSig.strokeWidth * (sw / 160f)
+                                    isAntiAlias = true
+                                }
+                                val path = android.graphics.Path()
+                                val start = points.first()
+                                path.moveTo(sx + start.x * sw, sy + start.y * sh)
+                                for (i in 1 until points.size) {
+                                    val pt = points[i]
+                                    if (pt.x == -1f && pt.y == -1f) {
+                                        if (i + 1 < points.size) {
+                                            val nextPt = points[i + 1]
+                                            path.moveTo(sx + nextPt.x * sw, sy + nextPt.y * sh)
+                                        }
+                                    } else {
+                                        path.lineTo(sx + pt.x * sw, sy + pt.y * sh)
+                                    }
+                                }
+                                canvas.drawPath(path, sigPaint)
+                            }
+                        }
+                    }
+                }
+
+                // Save to file
+                val outFileName = "merged_page_${page.id}_${UUID.randomUUID()}.png"
+                val outFile = File(getApplication<Application>().filesDir, outFileName)
+                try {
+                    val fos = FileOutputStream(outFile)
+                    mergedBitmap.compress(Bitmap.CompressFormat.PNG, 100, fos)
+                    fos.close()
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+
+                page.copy(
+                    backgroundScanPath = outFile.absolutePath,
+                    textAnnotations = emptyList(),
+                    signatures = emptyList()
+                )
+            }
+        }
+        return DocumentContent(pages = updatedPages)
     }
 
     fun setActivePageId(pageId: String) {
@@ -229,6 +603,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun editActivePageDrawings(drawings: List<DrawingDef>) {
+        pushToUndoStack()
         val currentContent = _uiState.value.activeDocumentContent
         val activePageId = _uiState.value.activePageId
         
@@ -246,6 +621,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun editActivePageAnnotations(annotations: List<TextAnnotationDef>) {
+        pushToUndoStack()
         val currentContent = _uiState.value.activeDocumentContent
         val activePageId = _uiState.value.activePageId
         
@@ -263,6 +639,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun editActivePageSignatures(signatures: List<SignatureOverlayDef>) {
+        pushToUndoStack()
         val currentContent = _uiState.value.activeDocumentContent
         val activePageId = _uiState.value.activePageId
         
@@ -280,6 +657,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun editActivePageRotation(rotationDegrees: Int) {
+        pushToUndoStack()
         val currentContent = _uiState.value.activeDocumentContent
         val activePageId = _uiState.value.activePageId
         
@@ -296,7 +674,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun editActivePageFilter(filterName: String) {
+        pushToUndoStack()
+        val currentContent = _uiState.value.activeDocumentContent
+        val activePageId = _uiState.value.activePageId
+        
+        val updatedPages = currentContent.pages.map { page ->
+            if (page.id == activePageId) {
+                page.copy(filterType = filterName)
+            } else {
+                page
+            }
+        }
+        
+        _uiState.update {
+            it.copy(activeDocumentContent = currentContent.copy(pages = updatedPages))
+        }
+    }
+
     fun addSignatureOverlay(sigDef: SignatureOverlayDef) {
+        pushToUndoStack()
         val currentContent = _uiState.value.activeDocumentContent
         val activePageId = _uiState.value.activePageId
         
@@ -314,6 +711,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun removeSignatureOverlay(sigId: String) {
+        pushToUndoStack()
         val currentContent = _uiState.value.activeDocumentContent
         val activePageId = _uiState.value.activePageId
         
@@ -330,6 +728,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun addNewPageToEditor() {
+        pushToUndoStack()
         val currentContent = _uiState.value.activeDocumentContent
         val sizePage = currentContent.pages.size
         
@@ -362,8 +761,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             for (i in 0 until count) {
                 val page = renderer.openPage(i)
-                val scale = 3.0f
-                val width = (page.width * scale).toInt().coerceIn(1600, 3200)
+                val scale = 4.0f
+                val width = (page.width * scale).toInt().coerceIn(2400, 4200)
                 val height = (width * page.height / page.width)
                 val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
                 val canvas = android.graphics.Canvas(bitmap)
@@ -388,6 +787,55 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } catch (e: Exception) {}
         }
         return paths
+    }
+
+    private fun processAndOptimizeImportedImage(context: android.content.Context, sourceFile: File): File {
+        try {
+            val exifInterface = android.media.ExifInterface(sourceFile.absolutePath)
+            val orientation = exifInterface.getAttributeInt(
+                android.media.ExifInterface.TAG_ORIENTATION,
+                android.media.ExifInterface.ORIENTATION_NORMAL
+            )
+
+            val rotationDegrees = when (orientation) {
+                android.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90
+                android.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180
+                android.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270
+                else -> 0
+            }
+
+            val decodeOptions = BitmapFactory.Options().apply { inSampleSize = 1 }
+            var decodedBitmap = BitmapFactory.decodeFile(sourceFile.absolutePath, decodeOptions) ?: return sourceFile
+
+            if (rotationDegrees != 0) {
+                val matrix = android.graphics.Matrix().apply { postRotate(rotationDegrees.toFloat()) }
+                val rotated = Bitmap.createBitmap(
+                    decodedBitmap,
+                    0,
+                    0,
+                    decodedBitmap.width,
+                    decodedBitmap.height,
+                    matrix,
+                    true
+                )
+                if (rotated != decodedBitmap) {
+                    decodedBitmap.recycle()
+                    decodedBitmap = rotated
+                }
+            }
+
+            val optimizedFile = File(sourceFile.parentFile, "proc_${System.currentTimeMillis()}_${UUID.randomUUID()}.jpg")
+            FileOutputStream(optimizedFile).use { fos ->
+                decodedBitmap.compress(Bitmap.CompressFormat.JPEG, 100, fos)
+            }
+
+            decodedBitmap.recycle()
+
+            return optimizedFile
+        } catch (e: Exception) {
+            Log.e("MainViewModel", "Error processing image", e)
+            return sourceFile
+        }
     }
 
     private fun createDummyPreview(documentsDir: File, name: String, fileSize: Int): String {
@@ -452,11 +900,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val newPages = mutableListOf<PageDef>()
 
                 if (isImage) {
+                    val processedFile = processAndOptimizeImportedImage(context, sourceFile)
                     val newPage = PageDef(
                         id = UUID.randomUUID().toString(),
                         pageNumber = sizePage + 1,
                         type = "scan",
-                        backgroundScanPath = sourceFile.absolutePath,
+                        backgroundScanPath = processedFile.absolutePath,
                         ocrText = "Imported Image Content $name"
                     )
                     newPages.add(newPage)
@@ -609,7 +1058,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
             repo.insertSignature(signature)
             triggerFeedback("Signature profile saved to studio database!")
-            navigateTo(Screen.Dashboard)
         }
     }
 
@@ -677,7 +1125,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 val inputStream = context.contentResolver.openInputStream(uri)
-                val originalBitmap = BitmapFactory.decodeStream(inputStream)
+                val decodeOptions = BitmapFactory.Options().apply {
+                    inSampleSize = 1
+                    inScaled = false
+                }
+                val originalBitmap = BitmapFactory.decodeStream(inputStream, null, decodeOptions)
                 inputStream?.close()
                 if (originalBitmap == null) {
                     triggerFeedback("Failed to load selected signature image.")
@@ -764,23 +1216,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun captureScannerStep(bitmap: Bitmap) {
+    fun captureScannerStep(bitmap: Bitmap, isImported: Boolean = false) {
         viewModelScope.launch {
             val isIdCard = _uiState.value.scannerIdMode
             val targetRatio = if (isIdCard) 1.58f else 0.707f // standard vertical A4 ratio is ~0.707
             
             // Auto detect & crop the bitmap to the target frame
-            val croppedBitmap = autoCropBitmap(bitmap, targetRatio)
-
+            val croppedBitmap = if (isImported) bitmap else autoCropBitmap(bitmap, targetRatio)
+ 
             val scansDir = File(getApplication<Application>().filesDir, "scans")
             if (!scansDir.exists()) scansDir.mkdirs()
-
+ 
             // Save raw scan file
             val file = File(scansDir, "scan_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(5)}.jpg")
             val fos = FileOutputStream(file)
-            croppedBitmap.compress(Bitmap.CompressFormat.JPEG, 90, fos)
+            croppedBitmap.compress(Bitmap.CompressFormat.JPEG, 100, fos)
             fos.close()
-
+ 
             _uiState.update {
                 it.copy(
                     scannerStepBitmaps = it.scannerStepBitmaps + croppedBitmap,
@@ -865,12 +1317,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val initialPages = mutableListOf<PageDef>()
 
                 if (isImage) {
+                    val processedFile = processAndOptimizeImportedImage(getApplication(), sourceFile)
                     initialPages.add(
                         PageDef(
                             id = UUID.randomUUID().toString(),
                             pageNumber = 1,
                             type = "scan",
-                            backgroundScanPath = sourceFile.absolutePath,
+                            backgroundScanPath = processedFile.absolutePath,
                             ocrText = "Imported Photo Content OCR layer"
                         )
                     )
@@ -1142,57 +1595,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun applyFilterToBitmap(bitmap: Bitmap, filterName: String): Bitmap {
-        return when (filterName) {
-            "black_white" -> {
-                val dest = Bitmap.createBitmap(bitmap.width, bitmap.height, bitmap.config ?: Bitmap.Config.ARGB_8888)
-                val canvas = android.graphics.Canvas(dest)
-                val paint = android.graphics.Paint()
-                val cm = android.graphics.ColorMatrix()
-                cm.setSaturation(0f)
-                val scale = 2.0f
-                val translate = -128f * scale + 128f
-                val contrast = android.graphics.ColorMatrix(floatArrayOf(
-                    scale, 0f, 0f, 0f, translate,
-                    0f, scale, 0f, 0f, translate,
-                    0f, 0f, scale, 0f, translate,
-                    0f, 0f, 0f, 1f, 0f
-                ))
-                cm.postConcat(contrast)
-                paint.colorFilter = android.graphics.ColorMatrixColorFilter(cm)
-                canvas.drawBitmap(bitmap, 0f, 0f, paint)
-                dest
-            }
-            "grayscale" -> {
-                val dest = Bitmap.createBitmap(bitmap.width, bitmap.height, bitmap.config ?: Bitmap.Config.ARGB_8888)
-                val canvas = android.graphics.Canvas(dest)
-                val paint = android.graphics.Paint()
-                val cm = android.graphics.ColorMatrix()
-                cm.setSaturation(0f)
-                paint.colorFilter = android.graphics.ColorMatrixColorFilter(cm)
-                canvas.drawBitmap(bitmap, 0f, 0f, paint)
-                dest
-            }
-            "enhance" -> {
-                val dest = Bitmap.createBitmap(bitmap.width, bitmap.height, bitmap.config ?: Bitmap.Config.ARGB_8888)
-                val canvas = android.graphics.Canvas(dest)
-                val paint = android.graphics.Paint()
-                val cm = android.graphics.ColorMatrix()
-                cm.setSaturation(1.4f)
-                val scale = 1.2f
-                val translate = -128f * scale + 128f + 10f
-                val contrast = android.graphics.ColorMatrix(floatArrayOf(
-                    scale, 0f, 0f, 0f, translate,
-                    0f, scale, 0f, 0f, translate,
-                    0f, 0f, scale, 0f, translate,
-                    0f, 0f, 0f, 1f, 0f
-                ))
-                cm.postConcat(contrast)
-                paint.colorFilter = android.graphics.ColorMatrixColorFilter(cm)
-                canvas.drawBitmap(bitmap, 0f, 0f, paint)
-                dest
-            }
-            else -> bitmap
-        }
+        return BitmapFilter.applyFilter(bitmap, filterName)
     }
 
     fun compileScannedDoc(title: String) {
@@ -1518,12 +1921,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val initialPages = mutableListOf<PageDef>()
 
                     if (isImage) {
+                        val processedFile = processAndOptimizeImportedImage(context, sourceFile)
                         initialPages.add(
                             PageDef(
                                 id = UUID.randomUUID().toString(),
                                 pageNumber = 1,
                                 type = "scan",
-                                backgroundScanPath = sourceFile.absolutePath,
+                                backgroundScanPath = processedFile.absolutePath,
                                 ocrText = "Imported Image Content OCR text layer"
                             )
                         )
@@ -1651,12 +2055,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val initialPages = mutableListOf<PageDef>()
 
                     if (isImage) {
+                        val processedFile = processAndOptimizeImportedImage(context, sourceFile)
                         initialPages.add(
                             PageDef(
                                 id = UUID.randomUUID().toString(),
                                 pageNumber = 1,
                                 type = "scan",
-                                backgroundScanPath = sourceFile.absolutePath,
+                                backgroundScanPath = processedFile.absolutePath,
                                 ocrText = "Imported Image Content OCR text layer"
                             )
                         )

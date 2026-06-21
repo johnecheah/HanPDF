@@ -43,8 +43,8 @@ data class SignatureOverlayDef(
     val id: String,
     val x: Float,
     val y: Float,
-    val width: Float = 160f,
-    val height: Float = 80f,
+    val width: Float = 110f,
+    val height: Float = 55f,
     val signatureProfileId: Int, // Refers to the drawn signature entity
     val colorHex: String = "#000000"
 )
@@ -58,7 +58,8 @@ data class PageDef(
     val textAnnotations: List<TextAnnotationDef> = emptyList(),
     val signatures: List<SignatureOverlayDef> = emptyList(),
     val ocrText: String? = null, // Extracted text content for OCR page index
-    val rotationDegrees: Int = 0
+    val rotationDegrees: Int = 0,
+    val filterType: String = "original"
 )
 
 data class DocumentContent(
