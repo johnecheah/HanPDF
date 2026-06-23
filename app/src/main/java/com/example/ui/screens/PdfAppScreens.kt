@@ -191,7 +191,7 @@ fun DashboardScreen(
         }
     }
 
-    val categories = listOf("All", "PDF", "Scan", "ID Card", "Cornell Note")
+    val categories = listOf("All", "PDF", "Scan", "ID Card", "Meeting Minutes")
 
     Scaffold(
         floatingActionButton = {
@@ -566,31 +566,11 @@ fun DashboardScreen(
                                 }
                             )
                             TemplateCardButton(
-                                icon = Icons.Default.Subject,
-                                label = "Lined Note",
-                                modifier = Modifier.weight(1f),
-                                onClick = {
-                                    viewModel.createNewTemplateDocument("Lined Notebook", "lined")
-                                    showCreateDialog = false
-                                }
-                            )
-                        }
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            TemplateCardButton(
-                                icon = Icons.Default.DashboardCustomize,
-                                label = "Cornell Grid",
-                                modifier = Modifier.weight(1f),
-                                onClick = {
-                                    viewModel.createNewTemplateDocument("Cornell Notes", "cornell")
-                                    showCreateDialog = false
-                                }
-                            )
-                            TemplateCardButton(
                                 icon = Icons.Default.Notes,
-                                label = "Meeting Min.",
+                                label = "Blank Doc",
                                 modifier = Modifier.weight(1f),
                                 onClick = {
-                                    viewModel.createNewTemplateDocument("Meeting Minutes Summary", "meeting")
+                                    viewModel.createWordDoc("Blank Doc")
                                     showCreateDialog = false
                                 }
                             )
@@ -2991,6 +2971,8 @@ fun EditorScreen(
     var drawColorHex by remember { mutableStateOf("#D62246") } // Defaults to Red Pencil
     var drawStrokeWidth by remember { mutableFloatStateOf(6f) }
     var drawPenType by remember { mutableStateOf("pen") } // "pen", "highlighter", "dashed"
+    var drawShapeType by remember { mutableStateOf("brush") } // "brush", "line", "box", "circle", "select"
+    var selectedDrawingId by remember { mutableStateOf<String?>(null) }
     var textStickerDraft by remember { mutableStateOf("") }
     var isAddingTextMode by remember { mutableStateOf(false) }
  
@@ -3027,9 +3009,15 @@ fun EditorScreen(
     var addWordOutlineColorHex by remember { mutableStateOf("#000000") }
     var editWordOutlineColorHex by remember { mutableStateOf("#000000") }
 
-    val currentDrawings = remember(activePage) { mutableStateListOf<DrawingDef>().colorsSync(activePage.drawings) }
-    val currentTextAnns = remember(activePage) { mutableStateListOf<TextAnnotationDef>().annotationSync(activePage.textAnnotations) }
-    val currentSignatures = remember(activePage) { mutableStateListOf<SignatureOverlayDef>().signatureSync(activePage.signatures) }
+    val currentDrawings = remember { mutableStateListOf<DrawingDef>() }
+    val currentTextAnns = remember { mutableStateListOf<TextAnnotationDef>() }
+    val currentSignatures = remember { mutableStateListOf<SignatureOverlayDef>() }
+
+    LaunchedEffect(activePage) {
+        currentDrawings.colorsSync(activePage.drawings)
+        currentTextAnns.annotationSync(activePage.textAnnotations)
+        currentSignatures.signatureSync(activePage.signatures)
+    }
 
     // Pan, Zoom, Rotate and Aspect orientation states
     var activeDraggingId by remember { mutableStateOf<String?>(null) }
@@ -3150,6 +3138,167 @@ fun EditorScreen(
                     .fillMaxWidth()
                     .background(MaterialTheme.colorScheme.surface)
             ) {
+                if (annotationMode == "draw") {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        tonalElevation = 2.dp,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            // Row 1: Shapes/Tools Selectors + Selected status / deletion
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                // Tools selector
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("Tool: ", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    listOf(
+                                        "brush" to Icons.Default.Gesture,
+                                        "line" to Icons.Default.Remove,
+                                        "box" to Icons.Default.BorderOuter,
+                                        "circle" to Icons.Default.Lens,
+                                        "select" to Icons.Default.OpenWith
+                                    ).forEach { (type, icon) ->
+                                        FilledIconButton(
+                                            onClick = {
+                                                drawShapeType = type
+                                                if (type != "select") {
+                                                    selectedDrawingId = null
+                                                }
+                                            },
+                                            modifier = Modifier.size(32.dp),
+                                            colors = IconButtonDefaults.filledIconButtonColors(
+                                                containerColor = if (drawShapeType == type) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                                contentColor = if (drawShapeType == type) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        ) {
+                                            Icon(icon, contentDescription = type, modifier = Modifier.size(16.dp))
+                                        }
+                                    }
+                                }
+
+                                // Delete selected shape button
+                                if (selectedDrawingId != null) {
+                                    Button(
+                                        onClick = {
+                                            val updated = currentDrawings.filter { it.id != selectedDrawingId }
+                                            currentDrawings.clear()
+                                            currentDrawings.addAll(updated)
+                                            viewModel.editActivePageDrawings(updated)
+                                            selectedDrawingId = null
+                                            viewModel.triggerFeedback("Shape deleted successfully.")
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                        modifier = Modifier.height(28.dp),
+                                        shape = RoundedCornerShape(4.dp)
+                                    ) {
+                                        Icon(Icons.Default.Delete, contentDescription = "Delete Shape", modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onError)
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Delete", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onError)
+                                    }
+                                } else if (drawShapeType == "select") {
+                                    Text("Tap shape on canvas to select", fontSize = 10.sp, color = MaterialTheme.colorScheme.primary, fontStyle = FontStyle.Italic)
+                                } else {
+                                    Text("Drag to draw ${drawShapeType}", fontSize = 10.sp, color = Color.Gray)
+                                }
+                            }
+
+                            // Row 2: Colors Palette Selection
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Color: ", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                val colors = listOf(
+                                    "#EF4444" to Color(0xFFEF4444),
+                                    "#3B82F6" to Color(0xFF3B82F6),
+                                    "#10B981" to Color(0xFF10B981),
+                                    "#1E293B" to Color(0xFF1E293B),
+                                    "#F59E0B" to Color(0xFFF59E0B),
+                                    "#8B5CF6" to Color(0xFF8B5CF6)
+                                )
+                                Row(
+                                    modifier = Modifier.weight(1f),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    colors.forEach { (hex, col) ->
+                                        Box(
+                                            modifier = Modifier
+                                                .size(24.dp)
+                                                .background(col, CircleShape)
+                                                .border(
+                                                    width = if (drawColorHex.lowercase() == hex.lowercase()) 2.dp else 1.dp,
+                                                    color = if (drawColorHex.lowercase() == hex.lowercase()) MaterialTheme.colorScheme.onSurface else Color.LightGray.copy(alpha = 0.5f),
+                                                    shape = CircleShape
+                                                )
+                                                .clickable {
+                                                    drawColorHex = hex
+                                                    val selId = selectedDrawingId
+                                                    if (selId != null) {
+                                                        val idx = currentDrawings.indexOfFirst { it.id == selId }
+                                                        if (idx != -1) {
+                                                            val updatedDraw = currentDrawings[idx].copy(colorHex = hex)
+                                                            currentDrawings[idx] = updatedDraw
+                                                            viewModel.editActivePageDrawings(currentDrawings.toList())
+                                                        }
+                                                    }
+                                                }
+                                        )
+                                    }
+                                }
+
+                                // Thickness Selectors
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("Size: ", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    listOf(3f to "3px", 6f to "6px", 12f to "12px", 24f to "24px").forEach { (sizeVal, name) ->
+                                        Box(
+                                            modifier = Modifier
+                                                .background(
+                                                    if (drawStrokeWidth == sizeVal) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else Color.Transparent,
+                                                    RoundedCornerShape(4.dp)
+                                                )
+                                                .border(
+                                                    1.dp,
+                                                    if (drawStrokeWidth == sizeVal) MaterialTheme.colorScheme.primary else Color.LightGray,
+                                                    RoundedCornerShape(4.dp)
+                                                )
+                                                .clickable {
+                                                    drawStrokeWidth = sizeVal
+                                                    val selId = selectedDrawingId
+                                                    if (selId != null) {
+                                                        val idx = currentDrawings.indexOfFirst { it.id == selId }
+                                                        if (idx != -1) {
+                                                            val updatedDraw = currentDrawings[idx].copy(strokeWidth = sizeVal)
+                                                            currentDrawings[idx] = updatedDraw
+                                                            viewModel.editActivePageDrawings(currentDrawings.toList())
+                                                        }
+                                                    }
+                                                }
+                                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                        ) {
+                                            Text(name, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 // Interactive annotations toolbar
                 Surface(
                     modifier = Modifier
@@ -3165,7 +3314,7 @@ fun EditorScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         IconButton(
-                            onClick = { annotationMode = "none"; isAddingTextMode = false },
+                            onClick = { annotationMode = "none"; isAddingTextMode = false; selectedDrawingId = null },
                             colors = IconButtonDefaults.iconButtonColors(
                                 containerColor = if (annotationMode == "none" && !isAddingTextMode) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else Color.Transparent
                             )
@@ -3177,7 +3326,7 @@ fun EditorScreen(
 
                         // Text Marker markup
                         IconButton(
-                            onClick = { isAddingTextMode = true; annotationMode = "none" },
+                            onClick = { isAddingTextMode = true; annotationMode = "none"; selectedDrawingId = null },
                             colors = IconButtonDefaults.iconButtonColors(
                                 containerColor = if (isAddingTextMode) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else Color.Transparent
                             )
@@ -3185,9 +3334,23 @@ fun EditorScreen(
                             Icon(Icons.Default.TextFields, "Add Text Layer", tint = if (isAddingTextMode) MaterialTheme.colorScheme.primary else Color.Gray)
                         }
 
+                        // Drawing and shapes trigger button
+                        IconButton(
+                            onClick = { annotationMode = "draw"; isAddingTextMode = false; selectedDrawingId = null },
+                            colors = IconButtonDefaults.iconButtonColors(
+                                containerColor = if (annotationMode == "draw") MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else Color.Transparent
+                            )
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Gesture,
+                                contentDescription = "Draw & Annotate Shapes",
+                                tint = if (annotationMode == "draw") MaterialTheme.colorScheme.primary else Color.Gray
+                            )
+                        }
+
                         // Overlay vector signatures and place them anywhere!
                         IconButton(
-                            onClick = { showSignatureSelectionDrawer = true },
+                            onClick = { showSignatureSelectionDrawer = true; selectedDrawingId = null },
                             colors = IconButtonDefaults.iconButtonColors(
                                 containerColor = if (annotationMode == "signature_overlay") MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else Color.Transparent
                             )
@@ -3696,39 +3859,65 @@ fun EditorScreen(
                     Canvas(
                         modifier = Modifier
                             .fillMaxSize()
-                            .pointerInput(activePage.id, annotationMode, isAddingTextMode) {
+                            .pointerInput(activePage.id, annotationMode, isAddingTextMode, drawShapeType) {
                                 if (annotationMode == "draw") {
-                                    detectDragGestures(
-                                        onDragStart = { offset ->
+                                    if (drawShapeType == "select") {
+                                        detectTapGestures { offset ->
                                             val rx = offset.x / size.width
                                             val ry = offset.y / size.height
-                                            val currentDrawnPoints = mutableListOf(PointDef(rx, ry))
-                                            currentDrawings.add(
-                                                DrawingDef(
-                                                    points = currentDrawnPoints,
-                                                    colorHex = drawColorHex,
-                                                    strokeWidth = drawStrokeWidth,
-                                                    isHighlighter = (drawPenType == "highlighter"),
-                                                    isDashed = (drawPenType == "dashed")
-                                                )
-                                            )
-                                        },
-                                        onDragEnd = {
-                                            viewModel.editActivePageDrawings(currentDrawings.toList())
-                                        },
-                                        onDrag = { change, dragAmount ->
-                                            change.consume()
-                                            val offset = change.position
-                                            val rx = offset.x / size.width
-                                            val ry = offset.y / size.height
-                                            
-                                            if (currentDrawings.isNotEmpty()) {
-                                                val lastDraw = currentDrawings.last()
-                                                val updatedPoints = lastDraw.points + PointDef(rx, ry)
-                                                currentDrawings[currentDrawings.size - 1] = lastDraw.copy(points = updatedPoints)
+                                            var found: DrawingDef? = null
+                                            for (drawing in currentDrawings.asReversed()) {
+                                                if (isTapNearDrawing(rx, ry, drawing)) {
+                                                    found = drawing
+                                                    break
+                                                }
+                                            }
+                                            selectedDrawingId = found?.id
+                                            if (found != null) {
+                                                viewModel.triggerFeedback("Shape selected! Use the color palette, size controls, or delete button.")
                                             }
                                         }
-                                    )
+                                    } else {
+                                        detectDragGestures(
+                                            onDragStart = { offset ->
+                                                val rx = offset.x / size.width
+                                                val ry = offset.y / size.height
+                                                val shapeId = java.util.UUID.randomUUID().toString()
+                                                val currentDrawnPoints = mutableListOf(PointDef(rx, ry))
+                                                currentDrawings.add(
+                                                    DrawingDef(
+                                                        points = currentDrawnPoints,
+                                                        colorHex = drawColorHex,
+                                                        strokeWidth = drawStrokeWidth,
+                                                        isHighlighter = (drawPenType == "highlighter"),
+                                                        isDashed = (drawPenType == "dashed"),
+                                                        id = shapeId,
+                                                        shapeType = drawShapeType
+                                                    )
+                                                )
+                                                selectedDrawingId = shapeId
+                                            },
+                                            onDragEnd = {
+                                                viewModel.editActivePageDrawings(currentDrawings.toList())
+                                            },
+                                            onDrag = { change, dragAmount ->
+                                                change.consume()
+                                                val offset = change.position
+                                                val rx = offset.x / size.width
+                                                val ry = offset.y / size.height
+                                                
+                                                if (currentDrawings.isNotEmpty()) {
+                                                    val lastDraw = currentDrawings.last()
+                                                    val updatedPoints = if (drawShapeType == "brush" || drawShapeType == "freehand") {
+                                                        lastDraw.points + PointDef(rx, ry)
+                                                     } else {
+                                                        listOf(lastDraw.points.first(), PointDef(rx, ry))
+                                                     }
+                                                    currentDrawings[currentDrawings.size - 1] = lastDraw.copy(points = updatedPoints)
+                                                }
+                                            }
+                                        )
+                                    }
                                 } else if (isAddingTextMode) {
                                     detectTapGestures { offset ->
                                         val rx = offset.x / size.width
@@ -3762,27 +3951,183 @@ fun EditorScreen(
                     // Render vector drawings path
                     for (draw in currentDrawings) {
                         if (draw.points.size < 2) continue
-                        val path = Path()
-                        path.moveTo(draw.points.first().x * size.width, draw.points.first().y * size.height)
-                        for (pt in draw.points.drop(1)) {
-                            path.lineTo(pt.x * size.width, pt.y * size.height)
-                        }
                         val baseColor = try { Color(AndroidColor.parseColor(draw.colorHex)) } catch (e: Exception) { Color.Black }
-                        drawPath(
-                            path = path,
-                            color = if (draw.isHighlighter) baseColor.copy(alpha = 0.45f) else baseColor,
-                            style = Stroke(
-                                width = draw.strokeWidth,
-                                cap = StrokeCap.Round,
-                                join = StrokeJoin.Round,
-                                pathEffect = if (draw.isDashed) androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(15f, 15f), 0f) else null
+                        val drawColor = if (draw.isHighlighter) baseColor.copy(alpha = 0.45f) else baseColor
+                        val scaledStrokeWidth = draw.strokeWidth * (size.width / 400f)
+                        val pathStyle = Stroke(
+                            width = scaledStrokeWidth,
+                            cap = StrokeCap.Round,
+                            join = StrokeJoin.Round,
+                            pathEffect = if (draw.isDashed) androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(15f * (size.width / 400f), 15f * (size.width / 400f)), 0f) else null
+                        )
+
+                        val isThisSelected = (draw.id.isNotEmpty() && draw.id == selectedDrawingId)
+
+                        when (draw.shapeType.lowercase()) {
+                            "line" -> {
+                                val start = draw.points.first()
+                                val end = draw.points.last()
+                                drawLine(
+                                    color = drawColor,
+                                    start = Offset(start.x * size.width, start.y * size.height),
+                                    end = Offset(end.x * size.width, end.y * size.height),
+                                    strokeWidth = scaledStrokeWidth,
+                                    cap = StrokeCap.Round,
+                                    pathEffect = if (draw.isDashed) androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(15f * (size.width / 400f), 15f * (size.width / 400f)), 0f) else null
+                                )
+                            }
+                            "box" -> {
+                                val start = draw.points.first()
+                                val end = draw.points.last()
+                                val left = minOf(start.x, end.x) * size.width
+                                val top = minOf(start.y, end.y) * size.height
+                                val right = maxOf(start.x, end.x) * size.width
+                                val bottom = maxOf(start.y, end.y) * size.height
+                                drawRect(
+                                    color = drawColor,
+                                    topLeft = Offset(left, top),
+                                    size = androidx.compose.ui.geometry.Size(right - left, bottom - top),
+                                    style = pathStyle
+                                )
+                            }
+                            "circle" -> {
+                                val start = draw.points.first()
+                                val end = draw.points.last()
+                                val left = minOf(start.x, end.x) * size.width
+                                val top = minOf(start.y, end.y) * size.height
+                                val right = maxOf(start.x, end.x) * size.width
+                                val bottom = maxOf(start.y, end.y) * size.height
+                                drawOval(
+                                    color = drawColor,
+                                    topLeft = Offset(left, top),
+                                    size = androidx.compose.ui.geometry.Size(right - left, bottom - top),
+                                    style = pathStyle
+                                )
+                            }
+                            else -> {
+                                // freehand / brush
+                                val path = Path()
+                                path.moveTo(draw.points.first().x * size.width, draw.points.first().y * size.height)
+                                for (pt in draw.points.drop(1)) {
+                                    path.lineTo(pt.x * size.width, pt.y * size.height)
+                                }
+                                drawPath(
+                                    path = path,
+                                    color = drawColor,
+                                    style = pathStyle
+                                )
+                            }
+                        }
+
+                        // Drawing selected visualization bounding box
+                        if (isThisSelected) {
+                            val p1 = draw.points.first()
+                            val p2 = draw.points.last()
+                            val (minX, maxX) = if (draw.shapeType.lowercase() == "freehand" || draw.shapeType.lowercase() == "brush") {
+                                val xs = draw.points.map { it.x }
+                                Pair(xs.minOrNull() ?: p1.x, xs.maxOrNull() ?: p1.x)
+                            } else {
+                                Pair(minOf(p1.x, p2.x), maxOf(p1.x, p2.x))
+                            }
+                            val (minY, maxY) = if (draw.shapeType.lowercase() == "freehand" || draw.shapeType.lowercase() == "brush") {
+                                val ys = draw.points.map { it.y }
+                                Pair(ys.minOrNull() ?: p1.y, ys.maxOrNull() ?: p1.y)
+                            } else {
+                                Pair(minOf(p1.y, p2.y), maxOf(p1.y, p2.y))
+                            }
+
+                            val margin = 8f
+                            val l = minX * size.width - margin
+                            val t = minY * size.height - margin
+                            val w = (maxX - minX) * size.width + margin * 2
+                            val h = (maxY - minY) * size.height + margin * 2
+                            drawRect(
+                                color = Color(0xFF2563EB),
+                                topLeft = Offset(l, t),
+                                size = androidx.compose.ui.geometry.Size(w, h),
+                                style = Stroke(
+                                    width = 2f,
+                                    pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(10f, 10f), 0f)
+                                )
                             )
+                        }
+                    }
+                }
+
+                if (activePage.type.lowercase() == "word") {
+                    var wordTextValue by remember(activePage.id) {
+                        val existing = currentTextAnns.firstOrNull { it.id == "word_main_content" }
+                        mutableStateOf(existing?.text ?: "")
+                    }
+                    
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.White)
+                            .padding(horizontal = 24.dp, vertical = 24.dp)
+                    ) {
+                        androidx.compose.foundation.text.BasicTextField(
+                            value = wordTextValue,
+                            onValueChange = { newText ->
+                                wordTextValue = newText
+                                val updatedList = currentTextAnns.toMutableList()
+                                val idx = updatedList.indexOfFirst { it.id == "word_main_content" }
+                                val updatedAnn = com.example.data.TextAnnotationDef(
+                                    id = "word_main_content",
+                                    text = newText,
+                                    x = 0.08f,
+                                    y = 0.08f,
+                                    fontSize = 14f,
+                                    colorHex = "#1E293B",
+                                    isBold = false,
+                                    alignment = "left"
+                                )
+                                if (idx != -1) {
+                                    updatedList[idx] = updatedAnn
+                                } else {
+                                    updatedList.add(updatedAnn)
+                                }
+                                
+                                val idxLocal = currentTextAnns.indexOfFirst { it.id == "word_main_content" }
+                                if (idxLocal != -1) {
+                                    currentTextAnns[idxLocal] = updatedAnn
+                                } else {
+                                    currentTextAnns.add(updatedAnn)
+                                }
+                                
+                                viewModel.editActivePageAnnotations(updatedList)
+                            },
+                            textStyle = androidx.compose.ui.text.TextStyle(
+                                fontSize = 14.sp,
+                                color = Color(0xFF1E293B),
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Default,
+                                lineHeight = 22.sp
+                            ),
+                            modifier = Modifier.fillMaxSize(),
+                            decorationBox = { innerTextField ->
+                                Box(modifier = Modifier.fillMaxSize()) {
+                                    if (wordTextValue.isEmpty()) {
+                                        Text(
+                                            text = "Type here...",
+                                            color = Color.LightGray,
+                                            fontSize = 14.sp
+                                        )
+                                    }
+                                    innerTextField()
+                                }
+                            }
                         )
                     }
                 }
 
+                val textAnnsToRender = if (activePage.type.lowercase() == "word") {
+                    currentTextAnns.filter { it.id != "word_main_content" }
+                } else {
+                    currentTextAnns
+                }
+
                 // Render text annotation overlays as draggable UI elements with exact coordinates!
-                currentTextAnns.forEachIndexed { idx, txtAnn ->
+                textAnnsToRender.forEachIndexed { idx, txtAnn ->
                     var itemOffsetX by remember(txtAnn.id) { mutableFloatStateOf(0f) }
                     var itemOffsetY by remember(txtAnn.id) { mutableFloatStateOf(0f) }
                     var fontSizeDelta by remember(txtAnn.id) { mutableFloatStateOf(0f) }
@@ -4160,6 +4505,48 @@ fun EditorScreen(
                     }
                 }
                 } // Clean close for nested BoxWithConstraints
+            }
+
+            // High-fidelity Floating Guidance card for imported files
+            if (activePage.backgroundScanPath != null && activePage.type.lowercase() != "word") {
+                Card(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 24.dp)
+                        .clickable { viewModel.runOcrAndConvertToWordMode() }
+                        .zIndex(500f),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.95f)
+                    ),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Description,
+                            contentDescription = "Loaded Text Block Icon",
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Column {
+                            Text(
+                                text = "Scan & Convert Page Text",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                            Text(
+                                text = "Tap this text block icon to make it fully editable.",
+                                fontSize = 10.sp,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -5846,6 +6233,70 @@ fun sharePdfFile(context: android.content.Context, document: com.example.data.Do
         context.startActivity(android.content.Intent.createChooser(shareIntent, "Send PDF Via"))
     } catch (e: Exception) {
         android.widget.Toast.makeText(context, "Error sharing file: ${e.localizedMessage}", android.widget.Toast.LENGTH_LONG).show()
+    }
+}
+
+fun distanceToSegment(tx: Float, ty: Float, sx: Float, sy: Float, ex: Float, ey: Float): Float {
+    val l2 = (ex - sx) * (ex - sx) + (ey - sy) * (ey - sy)
+    if (l2 == 0f) return (tx - sx) * (tx - sx) + (ty - sy) * (ty - sy)
+    var t = ((tx - sx) * (ex - sx) + (ty - sy) * (ey - sy)) / l2
+    t = maxOf(0f, minOf(1f, t))
+    val px = sx + t * (ex - sx)
+    val py = sy + t * (ey - sy)
+    return (tx - px) * (tx - px) + (ty - py) * (ty - py)
+}
+
+fun isTapNearDrawing(tapX: Float, tapY: Float, drawing: DrawingDef): Boolean {
+    if (drawing.points.isEmpty()) return false
+    if (drawing.points.size == 1) {
+        val pt = drawing.points[0]
+        val dx = tapX - pt.x
+        val dy = tapY - pt.y
+        return (dx * dx + dy * dy) < 0.0016f
+    }
+    
+    return when (drawing.shapeType.lowercase()) {
+        "line" -> {
+            val start = drawing.points.first()
+            val end = drawing.points.last()
+            distanceToSegment(tapX, tapY, start.x, start.y, end.x, end.y) < 0.0025f
+        }
+        "box" -> {
+            val start = drawing.points.first()
+            val end = drawing.points.last()
+            val l = minOf(start.x, end.x)
+            val r = maxOf(start.x, end.x)
+            val t = minOf(start.y, end.y)
+            val b = maxOf(start.y, end.y)
+            
+            val d1 = distanceToSegment(tapX, tapY, l, t, r, t)
+            val d2 = distanceToSegment(tapX, tapY, r, t, r, b)
+            val d3 = distanceToSegment(tapX, tapY, r, b, l, b)
+            val d4 = distanceToSegment(tapX, tapY, l, b, l, t)
+            minOf(d1, d2, d3, d4) < 0.0025f
+        }
+        "circle" -> {
+            val start = drawing.points.first()
+            val end = drawing.points.last()
+            val l = minOf(start.x, end.x)
+            val r = maxOf(start.x, end.x)
+            val t = minOf(start.y, end.y)
+            val b = maxOf(start.y, end.y)
+            
+            val d1 = distanceToSegment(tapX, tapY, l, t, r, t)
+            val d2 = distanceToSegment(tapX, tapY, r, t, r, b)
+            val d3 = distanceToSegment(tapX, tapY, r, b, l, b)
+            val d4 = distanceToSegment(tapX, tapY, l, b, l, t)
+            minOf(d1, d2, d3, d4) < 0.003f
+        }
+        else -> {
+            // "freehand", "brush" or custom lines
+            drawing.points.any { pt ->
+                val dx = tapX - pt.x
+                val dy = tapY - pt.y
+                (dx * dx + dy * dy) < 0.002f
+            }
+        }
     }
 }
 

@@ -34,30 +34,6 @@ fun MainActivityPresenter(
     }
 
     Scaffold(
-        snackbarHost = {
-            SnackbarHost(
-                hostState = snackbarHostState,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 80.dp) // Ensure it is above bottom navigation safe zones!
-            ) { data ->
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondary),
-                    shape = MaterialTheme.shapes.medium,
-                    modifier = Modifier
-                        .padding(horizontal = 16.dp)
-                        .fillMaxWidth()
-                ) {
-                    Text(
-                        text = data.visuals.message,
-                        color = Color.White,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(16.dp)
-                    )
-                }
-            }
-        },
         modifier = Modifier.fillMaxSize()
     ) { innerPadding ->
         // Render screen transitions smoothly
@@ -116,6 +92,29 @@ fun MainActivityPresenter(
                             viewModel = viewModel
                         )
                     }
+                }
+            }
+
+            // Overlay SNACKBAR at the Top!
+            SnackbarHost(
+                hostState = snackbarHostState,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.TopCenter)
+                    .padding(top = 16.dp, start = 16.dp, end = 16.dp)
+            ) { data ->
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondary),
+                    shape = MaterialTheme.shapes.medium,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = data.visuals.message,
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(12.dp)
+                    )
                 }
             }
         }

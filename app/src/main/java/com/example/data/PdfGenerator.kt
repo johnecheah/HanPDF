@@ -34,22 +34,15 @@ object PdfGenerator {
             val pages = content.pages.ifEmpty { listOf(PageDef("1", 1)) }
 
             for ((index, pageDef) in pages.withIndex()) {
-                var curW = 595
-                var curH = 842
+                // Enforce A4 size at 300 PPI: 2480 x 3508 pixels
+                val curW = 2480
+                val curH = 3508
 
-                if (pageDef.backgroundScanPath != null) {
-                    val file = File(pageDef.backgroundScanPath)
-                    if (file.exists()) {
-                        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                        BitmapFactory.decodeFile(file.absolutePath, options)
-                        if (options.outWidth > 0 && options.outHeight > 0) {
-                            curW = options.outWidth
-                            curH = options.outHeight
-                        }
-                    }
-                }
+                val isRotated90or270 = (pageDef.rotationDegrees % 180 != 0)
+                val finalW = if (isRotated90or270) curH else curW
+                val finalH = if (isRotated90or270) curW else curH
 
-                val pageInfo = PdfDocument.PageInfo.Builder(curW, curH, index + 1).create()
+                val pageInfo = PdfDocument.PageInfo.Builder(finalW, finalH, index + 1).create()
                 val page = pdfDocument.startPage(pageInfo)
                 val canvas = page.canvas
 
@@ -58,11 +51,11 @@ object PdfGenerator {
                     color = Color.WHITE
                     style = Paint.Style.FILL
                 }
-                canvas.drawRect(0f, 0f, curW.toFloat(), curH.toFloat(), bgPaint)
+                canvas.drawRect(0f, 0f, finalW.toFloat(), finalH.toFloat(), bgPaint)
 
                 // 1b. Apply page rotation around center
                 if (pageDef.rotationDegrees != 0) {
-                    canvas.rotate(pageDef.rotationDegrees.toFloat(), curW / 2f, curH / 2f)
+                    canvas.rotate(pageDef.rotationDegrees.toFloat(), finalW / 2f, finalH / 2f)
                 }
 
                 // 2. Draw standard templates if scan background is missing
@@ -80,7 +73,12 @@ object PdfGenerator {
                             } else {
                                 originalBmp
                             }
-                            val rect = RectF(0f, 0f, curW.toFloat(), curH.toFloat())
+                            val rect = RectF(
+                                (finalW - curW) / 2f,
+                                (finalH - curH) / 2f,
+                                (finalW + curW) / 2f,
+                                (finalH + curH) / 2f
+                            )
                             canvas.drawBitmap(bitmap, null, rect, Paint(Paint.FILTER_BITMAP_FLAG))
                             bitmap.recycle()
                         }
@@ -123,14 +121,46 @@ object PdfGenerator {
                         }
                     }
 
-                    val path = Path()
-                    val start = draw.points.first()
-                    path.moveTo(start.x * curW, start.y * curH)
-                    for (i in 1 until draw.points.size) {
-                        val pt = draw.points[i]
-                        path.lineTo(pt.x * curW, pt.y * curH)
+                    when (draw.shapeType.lowercase()) {
+                        "line" -> {
+                            val start = draw.points.first()
+                            val end = draw.points.last()
+                            canvas.drawLine(
+                                start.x * curW, start.y * curH,
+                                end.x * curW, end.y * curH,
+                                drawPaint
+                            )
+                        }
+                        "box" -> {
+                            val start = draw.points.first()
+                            val end = draw.points.last()
+                            val left = minOf(start.x, end.x) * curW
+                            val top = minOf(start.y, end.y) * curH
+                            val right = maxOf(start.x, end.x) * curW
+                            val bottom = maxOf(start.y, end.y) * curH
+                            canvas.drawRect(left, top, right, bottom, drawPaint)
+                        }
+                        "circle" -> {
+                            val start = draw.points.first()
+                            val end = draw.points.last()
+                            val left = minOf(start.x, end.x) * curW
+                            val top = minOf(start.y, end.y) * curH
+                            val right = maxOf(start.x, end.x) * curW
+                            val bottom = maxOf(start.y, end.y) * curH
+                            canvas.drawOval(left, top, right, bottom, drawPaint)
+                        }
+                        else -> {
+                            // freehand / brush
+                            val path = Path()
+                            val start = draw.points.first()
+                            path.moveTo(start.x * curW, start.y * curH)
+                            for (i in 1 until draw.points.size) {
+                                val pt = draw.points[i]
+                                path.lineTo(pt.x * curW, pt.y * curH)
+                            }
+                            canvas.drawPath(path, drawPaint)
+                        }
                     }
-                    canvas.drawPath(path, drawPaint)
                 }
 
                 // 4. Draw Text Layer Annotations
@@ -306,21 +336,22 @@ object PdfGenerator {
     }
 
     private fun drawLinedPaperTemplate(canvas: Canvas, w: Int, h: Int) {
+        val scale = w / 595f
         val marginPaint = Paint().apply {
             color = Color.parseColor("#E09090") // Red/pink margin line
-            strokeWidth = 1.5f
+            strokeWidth = 1.5f * scale
             style = Paint.Style.STROKE
         }
         val linePaint = Paint().apply {
             color = Color.parseColor("#C5D3E8") // Light Blue Horizontal Lines
-            strokeWidth = 1f
+            strokeWidth = 1f * scale
             style = Paint.Style.STROKE
         }
 
         val leftMargin = w * 0.15f
         canvas.drawLine(leftMargin, 0f, leftMargin, h.toFloat(), marginPaint)
 
-        val lineSpacing = 28f
+        val lineSpacing = 28f * scale
         var currentY = h * 0.08f
         while (currentY < h * 0.95f) {
             canvas.drawLine(0f, currentY, w.toFloat(), currentY, linePaint)
@@ -329,22 +360,23 @@ object PdfGenerator {
     }
 
     private fun drawCornellNotesTemplate(canvas: Canvas, w: Int, h: Int) {
+        val scale = w / 595f
         val boundaryPaint = Paint().apply {
             color = Color.parseColor("#80B3D6")
-            strokeWidth = 2f
+            strokeWidth = 2f * scale
             style = Paint.Style.STROKE
         }
         
         val titlePaint = Paint().apply {
             color = Color.parseColor("#333333")
-            textSize = 14f
+            textSize = 14f * scale
             typeface = Typeface.create(Typeface.DEFAULT_BOLD, Typeface.NORMAL)
         }
 
         // Draw top banner line
         val topBannerY = h * 0.08f
         canvas.drawLine(0f, topBannerY, w.toFloat(), topBannerY, boundaryPaint)
-        canvas.drawText("CORNELL NOTES", 20f, topBannerY - 20f, titlePaint)
+        canvas.drawText("CORNELL NOTES", 20f * scale, topBannerY - 20f * scale, titlePaint)
 
         // Draw cue column divider (30% width)
         val cueX = w * 0.3f
@@ -355,43 +387,31 @@ object PdfGenerator {
         canvas.drawLine(0f, summaryY, w.toFloat(), summaryY, boundaryPaint)
 
         // Draw sub-labels
-        titlePaint.textSize = 10f
-        canvas.drawText("CUES / QUESTIONS", 10f, topBannerY + 20f, titlePaint)
-        canvas.drawText("NOTES & DETAILS", cueX + 15f, topBannerY + 20f, titlePaint)
-        canvas.drawText("SUMMARY", 10f, summaryY + 20f, titlePaint)
+        titlePaint.textSize = 10f * scale
+        canvas.drawText("CUES / QUESTIONS", 10f * scale, topBannerY + 20f * scale, titlePaint)
+        canvas.drawText("NOTES & DETAILS", cueX + 15f * scale, topBannerY + 20f * scale, titlePaint)
+        canvas.drawText("SUMMARY", 10f * scale, summaryY + 20f * scale, titlePaint)
     }
 
     private fun drawMeetingMinutesTemplate(canvas: Canvas, w: Int, h: Int) {
+        val scale = w / 595f
         val dividerPaint = Paint().apply {
-            color = Color.parseColor("#5A6B7C")
-            strokeWidth = 2f
+            color = Color.parseColor("#1E3A8A")
+            strokeWidth = 3f * scale
             style = Paint.Style.STROKE
         }
-        val textPaint = Paint().apply {
-            color = Color.parseColor("#333333")
-            textSize = 15f
-            typeface = Typeface.create(Typeface.DEFAULT_BOLD, Typeface.NORMAL)
+        val thinPaint = Paint().apply {
+            color = Color.parseColor("#CBD5E1")
+            strokeWidth = 1f * scale
+            style = Paint.Style.STROKE
         }
-
-        // Header
-        canvas.drawText("MEETING MINUTES SUMMARY", 30f, 50f, textPaint)
-        canvas.drawLine(20f, 65f, w - 20f, 65f, dividerPaint)
-
-        val detailPaint = Paint().apply {
-            color = Color.parseColor("#666666")
-            textSize = 10f
-        }
-        canvas.drawText("DATE: ____/____/2026", 30f, 85f, detailPaint)
-        canvas.drawText("FACILITATOR: __________________", 240f, 85f, detailPaint)
-        canvas.drawText("SUBJECT / PURPOSE: _________________________________", 30f, 110f, detailPaint)
-
-        canvas.drawLine(20f, 130f, w - 20f, 130f, dividerPaint)
-
-        // Sections
-        textPaint.textSize = 11f
-        canvas.drawText("1. DISCUSSION POINTS & DECISIONS", 30f, 155f, textPaint)
-        canvas.drawText("2. ACTION ITEMS & WORKFLOWS", 30f, h * 0.55f, textPaint)
-        canvas.drawLine(20f, h * 0.55f + 15f, w - 20f, h * 0.55f + 15f, dividerPaint)
+        // Top corporate dual line border
+        canvas.drawLine(w * 0.08f, h * 0.12f, w * 0.92f, h * 0.12f, dividerPaint)
+        canvas.drawLine(w * 0.08f, h * 0.125f, w * 0.92f, h * 0.125f, thinPaint)
+        
+        // Bottom section content frame box
+        canvas.drawRect(w * 0.08f, h * 0.35f, w * 0.92f, h * 0.92f, thinPaint)
+        canvas.drawLine(w * 0.08f, h * 0.65f, w * 0.92f, h * 0.65f, thinPaint)
     }
 
     private fun drawSignatureOverlay(

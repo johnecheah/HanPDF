@@ -16,7 +16,9 @@ data class DrawingDef(
     val colorHex: String,
     val strokeWidth: Float,
     val isHighlighter: Boolean = false,
-    val isDashed: Boolean = false
+    val isDashed: Boolean = false,
+    val id: String = "",
+    val shapeType: String = "freehand"
 )
 
 data class TextAnnotationDef(
