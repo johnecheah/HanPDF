@@ -732,13 +732,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val rawY = textDef.y * curH
                     val fontMetricsTemp = android.graphics.Paint().apply { textSize = textDef.fontSize * (curW / 400f) }.fontMetrics
                     val powerShift = if (textDef.isPowerOf) (fontMetricsTemp.descent - fontMetricsTemp.ascent) * 0.45f else 0f
-                    val ry = rawY - powerShift
+                    val ry = rawY - fontMetrics.ascent - powerShift
                     val rxStart = when (textPaint.textAlign) {
                         android.graphics.Paint.Align.CENTER -> baseRx - maxLineWidth / 2f
                         android.graphics.Paint.Align.RIGHT -> baseRx - maxLineWidth
                         else -> baseRx
                     }
                     val rxEnd = rxStart + maxLineWidth
+
+                    val pdfPadding = 28f * (curW / 400f)
+                    val rectLeft = rxStart - pdfPadding
+                    val rectTop = ry + fontMetrics.ascent - pdfPadding
+                    val rectRight = rxEnd + pdfPadding
+                    val rectBottom = ry + (lines.size - 1) * lineHeight + fontMetrics.descent + pdfPadding
 
                     if (textDef.bgColorHex.isNotEmpty() && textDef.bgColorHex.lowercase() != "transparent") {
                         try {
@@ -747,10 +753,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 style = android.graphics.Paint.Style.FILL
                             }
                             canvas.drawRect(
-                                rxStart - 6f,
-                                ry + fontMetrics.top - 4f,
-                                rxEnd + 6f,
-                                ry + (lines.size - 1) * lineHeight + fontMetrics.bottom + 4f,
+                                rectLeft,
+                                rectTop,
+                                rectRight,
+                                rectBottom,
                                 bgPaint
                             )
                         } catch (e: Exception) { e.printStackTrace() }
@@ -764,10 +770,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 strokeWidth = 2f
                             }
                             canvas.drawRect(
-                                rxStart - 6f,
-                                ry + fontMetrics.top - 4f,
-                                rxEnd + 6f,
-                                ry + (lines.size - 1) * lineHeight + fontMetrics.bottom + 4f,
+                                rectLeft,
+                                rectTop,
+                                rectRight,
+                                rectBottom,
                                 outlinePaint
                             )
                         } catch (e: Exception) { e.printStackTrace() }
@@ -2445,7 +2451,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     isAntiAlias = true
                 }
                 currentPage.textAnnotations.forEachIndexed { idx, ann ->
-                    canvas.drawText(ann.text, (ann.x * curW), (ann.y * curH), textPaint)
+                    val baselineY = (ann.y * curH) - textPaint.fontMetrics.ascent
+                    canvas.drawText(ann.text, (ann.x * curW), baselineY, textPaint)
                 }
                 bitmap = tempBmp
             }

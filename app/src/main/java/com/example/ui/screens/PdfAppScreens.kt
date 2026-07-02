@@ -6166,12 +6166,13 @@ fun EditorScreenRemoved(
                             }
 
                             // Set visual properties and callbacks
+                            val scaleFactor = (pageMeasuredWidthPx / 400f).coerceAtLeast(0.1f)
                             val props = AdvancedTextAnnotationView.AnnotationProperties(
                                 id = txtAnn.id,
                                 text = txtAnn.text,
                                 x = txtAnn.x * pageMeasuredWidthPx,
                                 y = txtAnn.y * pageMeasuredHeightPx,
-                                fontSize = txtAnn.fontSize,
+                                fontSize = txtAnn.fontSize * scaleFactor,
                                 textColorHex = txtAnn.colorHex,
                                 bgColorHex = txtAnn.bgColorHex,
                                 fontName = txtAnn.fontName,
@@ -6208,7 +6209,7 @@ fun EditorScreenRemoved(
                                             x = newX,
                                             y = newY,
                                             text = updatedProps.text,
-                                            fontSize = updatedProps.fontSize
+                                            fontSize = updatedProps.fontSize / scaleFactor
                                         )
                                     } else it
                                 }

@@ -143,7 +143,7 @@ class AdvancedTextAnnotationView @JvmOverloads constructor(
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
             gravity = Gravity.CENTER_VERTICAL or Gravity.START
             setPadding(28, 28, 28, 28)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, currentProps.fontSize)
+            setTextSize(TypedValue.COMPLEX_UNIT_PX, currentProps.fontSize)
         }
 
         // Initialize transparent EditText for inline editing
@@ -286,8 +286,8 @@ class AdvancedTextAnnotationView @JvmOverloads constructor(
         editText.gravity = textGravity or Gravity.CENTER_VERTICAL
 
         // Font Size
-        textView.setTextSize(TypedValue.COMPLEX_UNIT_SP, currentProps.fontSize)
-        editText.setTextSize(TypedValue.COMPLEX_UNIT_SP, currentProps.fontSize)
+        textView.setTextSize(TypedValue.COMPLEX_UNIT_PX, currentProps.fontSize)
+        editText.setTextSize(TypedValue.COMPLEX_UNIT_PX, currentProps.fontSize)
 
         // Outline / Stroke
         textView.hasOutline = currentProps.hasOutline

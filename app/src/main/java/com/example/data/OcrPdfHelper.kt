@@ -31,6 +31,29 @@ object OcrPdfHelper {
     private const val TAG = "OcrPdfHelper"
 
     /**
+     * Convert Canvas/View coordinates to PDF coordinates
+     */
+    fun convertToPdfCoordinates(
+        viewX: Float,
+        viewY: Float,
+        viewWidth: Float,
+        viewHeight: Float,
+        pdfPageWidth: Float,      // PDPage mediaBox width
+        pdfPageHeight: Float,     // PDPage mediaBox height
+        scale: Float              // Current zoom scale
+    ): Pair<Float, Float> {
+        // Adjust for scale
+        val scaledX = viewX / scale
+        val scaledY = viewY / scale
+
+        // Convert Y axis (PDF origin is bottom-left)
+        val pdfX = scaledX
+        val pdfY = pdfPageHeight - scaledY   // <-- This is the most important line
+
+        return Pair(pdfX, pdfY)
+    }
+
+    /**
      * Extracts text from a background page image using local ML Kit, 
      * returning a list of editable TextAnnotationDef items mapped to positions.
      */
