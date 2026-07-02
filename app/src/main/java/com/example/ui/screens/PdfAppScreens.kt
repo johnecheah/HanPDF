@@ -7,6 +7,11 @@ import android.graphics.Color as AndroidColor
 import android.graphics.Paint as AndroidPaint
 import android.graphics.RectF as AndroidRectF
 import android.widget.Toast
+import android.webkit.WebView
+import android.webkit.WebSettings
+import android.webkit.WebViewClient
+import android.webkit.WebChromeClient
+import android.webkit.JavascriptInterface
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -14,6 +19,9 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitDragOrCancellation
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionOnScreen
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -44,12 +52,17 @@ import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.material.ripple.rememberRipple
 import androidx.compose.runtime.*
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
@@ -75,6 +88,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.example.data.*
 import com.example.ui.MainViewModel
 import com.example.ui.Screen
@@ -136,6 +151,226 @@ fun SelectableFeatureButton(
                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                 color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+    }
+}
+
+@Composable
+fun ESignStudioTabContent(
+    state: UiState,
+    viewModel: MainViewModel
+) {
+    val context = LocalContext.current
+    var signatureToDelete by remember { mutableStateOf<SignatureProfile?>(null) }
+    var showImportNamingDialog by remember { mutableStateOf(false) }
+    var importAlias by remember { mutableStateOf("") }
+    var selectedUriForImport by remember { mutableStateOf<android.net.Uri?>(null) }
+
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: android.net.Uri? ->
+        if (uri != null) {
+            selectedUriForImport = uri
+            showImportNamingDialog = true
+        }
+    }
+
+    if (showImportNamingDialog) {
+        AlertDialog(
+            onDismissRequest = { showImportNamingDialog = false },
+            title = { Text("Import Photo Signature", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Enter a name/alias for this signature profile:")
+                    OutlinedTextField(
+                        value = importAlias,
+                        onValueChange = { importAlias = it },
+                        label = { Text("Signature Title / Holder Name") },
+                        placeholder = { Text("e.g. John Doe - Scan") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val uri = selectedUriForImport
+                        if (uri != null) {
+                            viewModel.processAndSaveImageSignature(context, uri, importAlias)
+                            viewModel.triggerFeedback("Signature imported successfully!")
+                        }
+                        showImportNamingDialog = false
+                        importAlias = ""
+                        selectedUriForImport = null
+                    }
+                ) {
+                    Text("Import")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showImportNamingDialog = false
+                    importAlias = ""
+                    selectedUriForImport = null
+                }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (signatureToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { signatureToDelete = null },
+            title = { Text("Delete Signature Profile", fontWeight = FontWeight.Bold) },
+            text = { Text("Are you sure you want to permanently delete this signature profile? This action cannot be undone.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        signatureToDelete?.let { viewModel.deleteSignatureProfile(it) }
+                        signatureToDelete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { signatureToDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        // Hero Banner
+        Card(
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "E-Sign Studio",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 20.sp,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Create reusable digital signature profiles, draw on high-precision canvases, or import scan files.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
+                        lineHeight = 16.sp
+                    )
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Icon(
+                    imageVector = Icons.Default.Draw,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(48.dp)
+                )
+            }
+        }
+
+        // Action Buttons Row
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Button(
+                onClick = { viewModel.navigateTo(Screen.SignatureStudio) },
+                modifier = Modifier.weight(1f).testTag("launch_draw_pad_button"),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Icon(Icons.Default.Draw, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Launch Draw Pad", fontSize = 13.sp)
+            }
+
+            OutlinedButton(
+                onClick = { importLauncher.launch("image/*") },
+                modifier = Modifier.weight(1f).testTag("import_signature_button"),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Icon(Icons.Default.AddPhotoAlternate, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Import Signature", fontSize = 13.sp)
+            }
+        }
+
+        // List Header
+        Text(
+            text = "Stored Signature Profiles",
+            fontWeight = FontWeight.Bold,
+            fontSize = 15.sp,
+            color = MaterialTheme.colorScheme.primary
+        )
+
+        if (state.signatures.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+                    .border(BorderStroke(1.dp, Color.LightGray.copy(alpha = 0.3f)), RoundedCornerShape(12.dp))
+                    .padding(24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Draw,
+                        contentDescription = null,
+                        tint = Color.Gray.copy(alpha = 0.4f),
+                        modifier = Modifier.size(48.dp)
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "No saved profiles yet.",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                        color = Color.Gray
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Draw on the drawing pad or import a photo of your signature above.",
+                        fontSize = 11.sp,
+                        color = Color.Gray,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                }
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                items(state.signatures) { sig ->
+                    SignatureProfileItem(
+                        sig = sig,
+                        onDelete = { signatureToDelete = sig },
+                        onRename = { newName -> viewModel.renameSignatureProfile(sig, newName) },
+                        onExport = { viewModel.exportSignatureProfileTo300Ppi(sig) }
+                    )
+                }
+            }
         }
     }
 }
@@ -426,10 +661,10 @@ fun DashboardScreen(
                     BentoSquareItem(
                         icon = Icons.Default.Draw,
                         iconBackground = Color(0xFFF3E8FF),
-                        iconTint = Color(0xFF9333EA),
+                        iconTint = Color(0xFF8B5CF6),
                         title = "E-Sign Studio",
-                        subtitle = "Draw and import signature",
-                        tag = "action_sign",
+                        subtitle = "Manage & draw signatures",
+                        tag = "action_esign",
                         modifier = Modifier.weight(1f),
                         onClick = { viewModel.navigateTo(Screen.SignatureStudio) }
                     )
@@ -449,8 +684,8 @@ fun DashboardScreen(
                         tag = "action_id",
                         modifier = Modifier.weight(1f),
                         onClick = {
-                            viewModel.resetScanner(isIdMode = true)
-                            viewModel.navigateTo(Screen.ScanCamera)
+                            viewModel.resetIdScanner()
+                            viewModel.navigateTo(Screen.IdScanCamera)
                         }
                     )
 
@@ -1014,7 +1249,9 @@ fun DocumentListItem(
 fun SignatureProfileItem(
     sig: SignatureProfile,
     onDelete: () -> Unit,
-    onRename: (String) -> Unit
+    onRename: (String) -> Unit,
+    onExport: () -> Unit,
+    onLoadToCanvas: (() -> Unit)? = null
 ) {
     var showRenameDialog by remember { mutableStateOf(false) }
     var renameDraft by remember { mutableStateOf(sig.alias) }
@@ -1114,7 +1351,7 @@ fun SignatureProfileItem(
                                 }
                                 drawPath(
                                     path = path,
-                                    color = Color(AndroidColor.parseColor(sig.colorHex)),
+                                    color = Color(android.graphics.Color.parseColor(sig.colorHex)),
                                     style = Stroke(
                                         width = sig.strokeWidth * (size.width / 200f).coerceAtLeast(1.5f),
                                         cap = StrokeCap.Round,
@@ -1201,7 +1438,7 @@ fun SignatureProfileItem(
                                 }
                                 drawPath(
                                     path = path,
-                                    color = Color(AndroidColor.parseColor(sig.colorHex)),
+                                    color = Color(android.graphics.Color.parseColor(sig.colorHex)),
                                     style = Stroke(
                                         width = sig.strokeWidth * (size.width / 200f).coerceAtLeast(1.5f),
                                         cap = StrokeCap.Round,
@@ -1215,6 +1452,15 @@ fun SignatureProfileItem(
             }
             
             Spacer(modifier = Modifier.width(10.dp))
+            if (onLoadToCanvas != null && !sig.pathDataJson.startsWith("image:")) {
+                IconButton(onClick = onLoadToCanvas) {
+                    Icon(
+                        imageVector = Icons.Default.OpenInNew,
+                        contentDescription = "Load to Canvas",
+                        tint = MaterialTheme.colorScheme.secondary
+                    )
+                }
+            }
             IconButton(onClick = { showRenameDialog = true }) {
                 Icon(Icons.Default.Edit, contentDescription = "Rename Signature", tint = MaterialTheme.colorScheme.primary)
             }
@@ -1226,6 +1472,14 @@ fun SignatureProfileItem(
 }
 
 // --- 2. SIGNATURE STUDIO DRAW CANVAS SCREEN ---
+ 
+// --- Canvas Stroke definition for Signature Studio ---
+data class CanvasStroke(
+    val points: List<PointDef>,
+    val colorHex: String,
+    val thickness: Float,
+    val penType: String // "pen", "calligraphy", "highlighter", "dashed"
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -1235,9 +1489,20 @@ fun SignatureStudioScreen(
     val context = LocalContext.current
     val state by viewModel.uiState.collectAsState()
     var aliasText by remember { mutableStateOf(TextFieldValue("")) }
-    val drawnPoints = remember { mutableStateListOf<PointDef>() }
+
+    // Professional drawing state
+    val strokes = remember { mutableStateListOf<CanvasStroke>() }
+    val redoStrokes = remember { mutableStateListOf<CanvasStroke>() }
+    val activePoints = remember { mutableStateListOf<PointDef>() }
+
+    // Canvas styling state
     var selectedColor by remember { mutableStateOf("#000000") } // Onyx Black
     var selectedThickness by remember { mutableFloatStateOf(4f) }
+    var selectedPenType by remember { mutableStateOf("pen") } // "pen", "calligraphy", "highlighter", "dashed"
+    var selectedTemplate by remember { mutableStateOf("white") } // "white", "lined", "graph", "slate"
+    var isEraserMode by remember { mutableStateOf(false) }
+    var customColorHexInput by remember { mutableStateOf("") }
+    var showColorHelpDialog by remember { mutableStateOf(false) }
 
     val imageLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -1246,43 +1511,95 @@ fun SignatureStudioScreen(
             viewModel.processAndSaveImageSignature(context, uri, aliasText.text)
         }
     }
-    
+
     val colors = listOf(
-        Pair("#000000", Color.Black),
-        Pair("#1B3B6F", Color(0xFF1B3B6F)), // Fountain Royal Blue
-        Pair("#D62246", Color(0xFFD62246))  // Signature Red
+        Pair("#000000", "Midnight Black"),
+        Pair("#1B3B6F", "Fountain Blue"),
+        Pair("#D62246", "Crimson Red"),
+        Pair("#10B981", "Emerald Green"),
+        Pair("#8B5CF6", "Royal Purple"),
+        Pair("#F59E0B", "Amber Gold")
     )
+
+    fun eraseAt(rx: Float, ry: Float) {
+        val threshold = 0.04f // Erase within 4% distance of the touch point
+        val toRemove = strokes.filter { stroke ->
+            stroke.points.any { pt ->
+                val dx = pt.x - rx
+                val dy = pt.y - ry
+                (dx * dx + dy * dy) < (threshold * threshold)
+            }
+        }
+        if (toRemove.isNotEmpty()) {
+            toRemove.forEach { stroke ->
+                strokes.remove(stroke)
+                redoStrokes.add(stroke)
+            }
+        }
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Signature Studio", fontWeight = FontWeight.Bold) },
+                title = {
+                    Column {
+                        Text("Signature & Sketch Studio", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        Text("Vector Canvas & Digital Profiles", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = { viewModel.navigateTo(Screen.Dashboard) }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
+                    // Reset Button
+                    IconButton(
+                        onClick = {
+                            strokes.clear()
+                            redoStrokes.clear()
+                            activePoints.clear()
+                            viewModel.triggerFeedback("Canvas cleared.")
+                        },
+                        enabled = strokes.isNotEmpty() || activePoints.isNotEmpty()
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = "Clear Canvas")
+                    }
+
+                    Spacer(modifier = Modifier.width(4.dp))
+
                     Button(
                         onClick = {
-                            if (drawnPoints.isEmpty()) {
+                            val flattenedPoints = mutableListOf<PointDef>()
+                            strokes.forEach { stroke ->
+                                flattenedPoints.addAll(stroke.points)
+                                flattenedPoints.add(PointDef(-1f, -1f))
+                            }
+                            if (flattenedPoints.isNotEmpty() && flattenedPoints.last().x == -1f) {
+                                flattenedPoints.removeAt(flattenedPoints.lastIndex)
+                            }
+
+                            if (flattenedPoints.isEmpty()) {
                                 viewModel.triggerFeedback("Draw inside the canvas first!")
                             } else {
                                 viewModel.saveDrawnSignature(
                                     aliasText.text,
-                                    drawnPoints.toList(),
+                                    flattenedPoints.toList(),
                                     selectedColor,
                                     selectedThickness
                                 )
-                                drawnPoints.clear()
+                                strokes.clear()
+                                redoStrokes.clear()
+                                activePoints.clear()
                                 aliasText = TextFieldValue("")
                             }
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                        shape = RoundedCornerShape(12.dp)
                     ) {
-                        Icon(Icons.Default.Save, "Save Signature", modifier = Modifier.size(16.dp))
+                        Icon(Icons.Default.Save, "Save Profile", modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Save Profile")
+                        Text("Save Profile", fontSize = 13.sp)
                     }
                 }
             )
@@ -1295,61 +1612,396 @@ fun SignatureStudioScreen(
                 .background(MaterialTheme.colorScheme.background)
                 .padding(16.dp)
         ) {
-            TextField(
-                value = aliasText,
-                onValueChange = { aliasText = it },
-                label = { Text("Signature Title / Holder Name") },
-                placeholder = { Text("e.g. John Doe - Work Sign") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-                colors = TextFieldDefaults.colors(
-                    focusedLabelColor = MaterialTheme.colorScheme.primary,
-                    focusedIndicatorColor = MaterialTheme.colorScheme.primary
-                )
-            )
+            // Profile details card (Bento style)
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.08f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 12.dp)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    TextField(
+                        value = aliasText,
+                        onValueChange = { aliasText = it },
+                        label = { Text("Signature Title / Holder Name") },
+                        placeholder = { Text("e.g. John Doe - Work Sign") },
+                        singleLine = true,
+                        leadingIcon = { Icon(Icons.Default.Title, null, modifier = Modifier.size(18.dp)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = Color.Transparent,
+                            unfocusedContainerColor = Color.Transparent,
+                            focusedLabelColor = MaterialTheme.colorScheme.primary,
+                            focusedIndicatorColor = MaterialTheme.colorScheme.primary
+                        )
+                    )
+                }
+            }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Text("Pick Ink Profile:", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.secondary)
+            // Quick Background Paper Selection Toggle
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                    .padding(bottom = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                // Color Select
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    colors.forEach { (hex, col) ->
-                        val isSelected = selectedColor == hex
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .background(col, CircleShape)
-                                .border(
-                                    BorderStroke(
-                                        if (isSelected) 3.dp else 1.dp,
-                                        if (isSelected) MaterialTheme.colorScheme.primary else Color.LightGray
-                                    ),
-                                    CircleShape
-                                )
-                                .clickable { selectedColor = hex }
+                Text(
+                    text = "Canvas Texture:",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.secondary
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf(
+                        Pair("white", "Blank"),
+                        Pair("lined", "Lined"),
+                        Pair("graph", "Graph"),
+                        Pair("slate", "Slate")
+                    ).forEach { (type, name) ->
+                        val isSel = selectedTemplate == type
+                        FilterChip(
+                            selected = isSel,
+                            onClick = { selectedTemplate = type },
+                            label = { Text(name, fontSize = 11.sp) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                selectedLabelColor = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
                         )
                     }
                 }
-                
-                // Stroke select
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text("Thickness:", fontSize = 12.sp, color = MaterialTheme.colorScheme.secondary)
-                    listOf(2f, 4f, 6f).forEach { thick ->
-                        val isSelected = selectedThickness == thick
-                        InputChip(
-                            selected = isSelected,
-                            onClick = { selectedThickness = thick },
-                            label = { Text("${thick.toInt()}pt") }
+            }
+
+            // Interactive Canvas Card
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(2.1f)
+                    .shadow(4.dp, RoundedCornerShape(16.dp)),
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
+            ) {
+                Box(modifier = Modifier.fillMaxSize()) {
+                    Canvas(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .testTag("signature_canvas")
+                            .pointerInput(selectedColor, selectedThickness, selectedPenType, isEraserMode) {
+                                if (isEraserMode) {
+                                    detectDragGestures(
+                                        onDragStart = { offset ->
+                                            eraseAt(offset.x / size.width, offset.y / size.height)
+                                        },
+                                        onDrag = { change, _ ->
+                                            change.consume()
+                                            eraseAt(change.position.x / size.width, change.position.y / size.height)
+                                        }
+                                    )
+                                } else {
+                                    detectDragGestures(
+                                        onDragStart = { offset ->
+                                            redoStrokes.clear()
+                                            activePoints.clear()
+                                            activePoints.add(PointDef(offset.x / size.width, offset.y / size.height))
+                                        },
+                                        onDragEnd = {
+                                            if (activePoints.isNotEmpty()) {
+                                                strokes.add(
+                                                    CanvasStroke(
+                                                        points = activePoints.toList(),
+                                                        colorHex = selectedColor,
+                                                        thickness = selectedThickness,
+                                                        penType = selectedPenType
+                                                    )
+                                                )
+                                                activePoints.clear()
+                                            }
+                                        },
+                                        onDragCancel = {
+                                            activePoints.clear()
+                                        },
+                                        onDrag = { change, _ ->
+                                            change.consume()
+                                            activePoints.add(PointDef((change.position.x / size.width).coerceIn(0f, 1f), (change.position.y / size.height).coerceIn(0f, 1f)))
+                                        }
+                                    )
+                                }
+                            }
+                    ) {
+                        // 1. Draw Template background
+                        drawCanvasTemplateBackground(selectedTemplate, size)
+
+                        // 2. Draw completed strokes
+                        strokes.forEach { stroke ->
+                            drawStroke(stroke, size)
+                        }
+
+                        // 3. Draw active stroke
+                        if (activePoints.isNotEmpty()) {
+                            val temp = CanvasStroke(
+                                points = activePoints.toList(),
+                                colorHex = selectedColor,
+                                thickness = selectedThickness,
+                                penType = selectedPenType
+                            )
+                            drawStroke(temp, size)
+                        }
+                    }
+
+                    // Watermark help if empty
+                    if (strokes.isEmpty() && activePoints.isEmpty()) {
+                        Column(
+                            modifier = Modifier.align(Alignment.Center),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Icon(
+                                Icons.Default.Gesture,
+                                contentDescription = null,
+                                tint = if (selectedTemplate == "slate") Color.White.copy(alpha = 0.15f) else MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f),
+                                modifier = Modifier.size(48.dp)
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "Sign or sketch inside this boundary",
+                                color = if (selectedTemplate == "slate") Color.White.copy(alpha = 0.35f) else MaterialTheme.colorScheme.secondary.copy(alpha = 0.35f),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+
+                    // Floating overlays on Canvas (Undo, Redo, Eraser indicators)
+                    Row(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(8.dp)
+                            .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(24.dp))
+                            .padding(horizontal = 4.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(
+                            onClick = {
+                                if (strokes.isNotEmpty()) {
+                                    val last = strokes.removeAt(strokes.lastIndex)
+                                    redoStrokes.add(last)
+                                }
+                            },
+                            enabled = strokes.isNotEmpty(),
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.Undo,
+                                contentDescription = "Undo stroke",
+                                tint = if (strokes.isNotEmpty()) Color.White else Color.White.copy(alpha = 0.3f),
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                        IconButton(
+                            onClick = {
+                                if (redoStrokes.isNotEmpty()) {
+                                    val last = redoStrokes.removeAt(redoStrokes.lastIndex)
+                                    strokes.add(last)
+                                }
+                            },
+                            enabled = redoStrokes.isNotEmpty(),
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.Redo,
+                                contentDescription = "Redo stroke",
+                                tint = if (redoStrokes.isNotEmpty()) Color.White else Color.White.copy(alpha = 0.3f),
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+
+                    // Floating status pill on bottom-left
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(8.dp)
+                            .background(
+                                color = if (isEraserMode) Color(0xFFEF4444).copy(alpha = 0.85f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = if (isEraserMode) "Eraser Mode" else when (selectedPenType) {
+                                "calligraphy" -> "Fountain Brush"
+                                "highlighter" -> "Highlighter (Neon)"
+                                "dashed" -> "Dashed Pen"
+                                else -> "Standard Ink Pen"
+                            },
+                            color = Color.White,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Professional Bento Tool Selector Card
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)),
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.08f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    // Tool Selection (Standard, Calligraphy, Highlighter, Dashed, Eraser)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Active Brush Tool:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.secondary)
+                        
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            // Standard Pen
+                            IconButton(
+                                onClick = { selectedPenType = "pen"; isEraserMode = false },
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .background(if (!isEraserMode && selectedPenType == "pen") MaterialTheme.colorScheme.primary else Color.Transparent, CircleShape)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Gesture,
+                                    contentDescription = "Standard Pen",
+                                    tint = if (!isEraserMode && selectedPenType == "pen") Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            // Fountain Pen / Calligraphy
+                            IconButton(
+                                onClick = { selectedPenType = "calligraphy"; isEraserMode = false },
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .background(if (!isEraserMode && selectedPenType == "calligraphy") MaterialTheme.colorScheme.primary else Color.Transparent, CircleShape)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Brush,
+                                    contentDescription = "Calligraphy Brush",
+                                    tint = if (!isEraserMode && selectedPenType == "calligraphy") Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            // Neon Highlighter
+                            IconButton(
+                                onClick = { selectedPenType = "highlighter"; isEraserMode = false },
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .background(if (!isEraserMode && selectedPenType == "highlighter") MaterialTheme.colorScheme.primary else Color.Transparent, CircleShape)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.BorderColor,
+                                    contentDescription = "Neon Highlighter",
+                                    tint = if (!isEraserMode && selectedPenType == "highlighter") Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                            // Dashed Pen
+                            IconButton(
+                                onClick = { selectedPenType = "dashed"; isEraserMode = false },
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .background(if (!isEraserMode && selectedPenType == "dashed") MaterialTheme.colorScheme.primary else Color.Transparent, CircleShape)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.LinearScale,
+                                    contentDescription = "Dashed Pen",
+                                    tint = if (!isEraserMode && selectedPenType == "dashed") Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            // Vector Eraser
+                            IconButton(
+                                onClick = { isEraserMode = true },
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .background(if (isEraserMode) Color(0xFFEF4444) else Color.Transparent, CircleShape)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.AutoFixNormal,
+                                    contentDescription = "Vector Eraser",
+                                    tint = if (isEraserMode) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Color Palette Selector Row
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("Ink / Accent Color:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.secondary)
+                        
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            colors.forEach { (hex, name) ->
+                                val isSelected = selectedColor.lowercase() == hex.lowercase() && !isEraserMode
+                                Box(
+                                    modifier = Modifier
+                                        .size(30.dp)
+                                        .background(Color(android.graphics.Color.parseColor(hex)), CircleShape)
+                                        .border(
+                                            BorderStroke(
+                                                if (isSelected) 2.5.dp else 1.dp,
+                                                if (isSelected) MaterialTheme.colorScheme.primary else Color.LightGray.copy(alpha = 0.5f)
+                                            ),
+                                            CircleShape
+                                        )
+                                        .clickable {
+                                            selectedColor = hex
+                                            isEraserMode = false
+                                        }
+                                )
+                            }
+
+                            // Custom Color Button
+                            IconButton(
+                                onClick = { showColorHelpDialog = true },
+                                modifier = Modifier
+                                    .size(30.dp)
+                                    .background(MaterialTheme.colorScheme.surface, CircleShape)
+                                    .border(1.dp, Color.LightGray.copy(alpha = 0.5f), CircleShape)
+                            ) {
+                                Icon(Icons.Default.ColorLens, "Custom color", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Stroke Thickness Slider Control
+                    Column {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Line Thickness:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.secondary)
+                            Text("${selectedThickness.roundToInt()} pt", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                        }
+                        Slider(
+                            value = selectedThickness,
+                            onValueChange = { selectedThickness = it },
+                            valueRange = 1f..24f,
+                            colors = SliderDefaults.colors(
+                                thumbColor = MaterialTheme.colorScheme.primary,
+                                activeTrackColor = MaterialTheme.colorScheme.primary,
+                                inactiveTrackColor = MaterialTheme.colorScheme.outlineVariant
+                            ),
+                            modifier = Modifier.padding(horizontal = 4.dp)
                         )
                     }
                 }
@@ -1357,129 +2009,33 @@ fun SignatureStudioScreen(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Signature workspace Canvas box
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(2f)
-                    .background(Color.White, RoundedCornerShape(12.dp))
-                    .border(BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)), RoundedCornerShape(12.dp))
-                    .clip(RoundedCornerShape(12.dp))
-                    .testTag("signature_canvas")
-            ) {
-                Canvas(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .pointerInput(Unit) {
-                            detectDragGestures(
-                                onDragStart = { offset ->
-                                    val rx = offset.x / size.width
-                                    val ry = offset.y / size.height
-                                    drawnPoints.add(PointDef(rx, ry))
-                                },
-                                onDragEnd = {
-                                    // Add demarcation point for path liftoff
-                                    drawnPoints.add(PointDef(-1f, -1f))
-                                },
-                                onDrag = { change, dragAmount ->
-                                    change.consume()
-                                    val offset = change.position
-                                    val rx = offset.x / size.width
-                                    val ry = offset.y / size.height
-                                    drawnPoints.add(PointDef(rx, ry))
-                                }
-                            )
-                        }
-                ) {
-                    if (drawnPoints.isNotEmpty()) {
-                        val path = Path()
-                        val start = drawnPoints.first()
-                        path.moveTo(start.x * size.width, start.y * size.height)
-
-                        for (i in 1 until drawnPoints.size) {
-                            val pt = drawnPoints[i]
-                            if (pt.x == -1f && pt.y == -1f) {
-                                if (i + 1 < drawnPoints.size) {
-                                    val next = drawnPoints[i + 1]
-                                    path.moveTo(next.x * size.width, next.y * size.height)
-                                }
-                            } else {
-                                path.lineTo(pt.x * size.width, pt.y * size.height)
-                            }
-                        }
-
-                        drawPath(
-                            path = path,
-                            color = Color(AndroidColor.parseColor(selectedColor)),
-                            style = Stroke(
-                                width = selectedThickness,
-                                cap = StrokeCap.Round,
-                                join = StrokeJoin.Round
-                            )
-                        )
-                    }
-                }
-                
-                if (drawnPoints.isEmpty()) {
-                    Column(
-                        modifier = Modifier.align(Alignment.Center),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Icon(
-                            Icons.Default.Gesture,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.secondary.copy(alpha = 0.25f),
-                            modifier = Modifier.size(56.dp)
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Sign inside this boundary",
-                            color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.5f),
-                            fontSize = 13.sp
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-            
-            // Action buttons row
+            // Secondary Actions Row
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 OutlinedButton(
-                    onClick = { drawnPoints.clear() },
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Red),
-                    border = BorderStroke(1.dp, Color.Red)
-                ) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Clear Canvas")
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Reset")
-                }
-
-                Button(
                     onClick = { imageLauncher.launch("image/*") },
                     modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary)
                 ) {
-                    Icon(Icons.Default.AddPhotoAlternate, contentDescription = "Import Signature Image")
+                    Icon(Icons.Default.AddPhotoAlternate, contentDescription = "Import image signature", modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Import Image")
+                    Text("Import Photo Signature", fontSize = 11.sp)
                 }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(12.dp))
             HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f), thickness = 1.dp)
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
+            // Signature Profile Database Directory Header
             Text(
                 text = "Stored Signature Profiles",
                 fontWeight = FontWeight.Bold,
                 fontSize = 15.sp,
                 color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(bottom = 12.dp)
+                modifier = Modifier.padding(bottom = 8.dp)
             )
 
             if (state.signatures.isEmpty()) {
@@ -1500,15 +2056,15 @@ fun SignatureStudioScreen(
                             imageVector = Icons.Default.Draw,
                             contentDescription = null,
                             tint = Color.Gray.copy(alpha = 0.4f),
-                            modifier = Modifier.size(40.dp)
+                            modifier = Modifier.size(36.dp)
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "No saved profiles yet. Draw inside the box or import an image, then click 'Save Profile'.",
-                            fontSize = 12.sp,
+                            text = "No saved profiles yet. Draw inside the box or import a signature image, then save.",
+                            fontSize = 11.sp,
                             color = Color.Gray,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                            lineHeight = 16.sp
+                            lineHeight = 15.sp
                         )
                     }
                 }
@@ -1549,12 +2105,292 @@ fun SignatureStudioScreen(
                         SignatureProfileItem(
                             sig = sig,
                             onDelete = { signatureToDelete = sig },
-                            onRename = { newName -> viewModel.renameSignatureProfile(sig, newName) }
+                            onRename = { newName -> viewModel.renameSignatureProfile(sig, newName) },
+                            onExport = { viewModel.exportSignatureProfileTo300Ppi(sig) },
+                            onLoadToCanvas = {
+                                // Load back signature vectors directly to canvas!
+                                val pts = DocumentSerializer.pointsFromJson(sig.pathDataJson)
+                                strokes.clear()
+                                redoStrokes.clear()
+                                activePoints.clear()
+                                if (pts.isNotEmpty()) {
+                                    val currentStrokePoints = mutableListOf<PointDef>()
+                                    pts.forEach { p ->
+                                        if (p.x == -1f && p.y == -1f) {
+                                            if (currentStrokePoints.isNotEmpty()) {
+                                                strokes.add(
+                                                    CanvasStroke(
+                                                        points = currentStrokePoints.toList(),
+                                                        colorHex = sig.colorHex,
+                                                        thickness = sig.strokeWidth,
+                                                        penType = "pen"
+                                                    )
+                                                )
+                                                currentStrokePoints.clear()
+                                            }
+                                        } else {
+                                            currentStrokePoints.add(p)
+                                        }
+                                    }
+                                    if (currentStrokePoints.isNotEmpty()) {
+                                        strokes.add(
+                                            CanvasStroke(
+                                                points = currentStrokePoints.toList(),
+                                                colorHex = sig.colorHex,
+                                                thickness = sig.strokeWidth,
+                                                penType = "pen"
+                                            )
+                                        )
+                                    }
+                                    selectedColor = sig.colorHex
+                                    selectedThickness = sig.strokeWidth
+                                    aliasText = TextFieldValue(sig.alias)
+                                    isEraserMode = false
+                                    viewModel.triggerFeedback("Loaded vector signature back to workspace!")
+                                }
+                            }
                         )
                     }
                 }
             }
         }
+    }
+
+    // Custom Color Hex Help dialog
+    if (showColorHelpDialog) {
+        AlertDialog(
+            onDismissRequest = { showColorHelpDialog = false },
+            title = { Text("Custom Color Hex Code", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Type any hex color code below to draw with custom inks:", fontSize = 13.sp)
+                    OutlinedTextField(
+                        value = customColorHexInput,
+                        onValueChange = { customColorHexInput = it },
+                        label = { Text("Hex Code (e.g. #FF5733 or #800080)") },
+                        placeholder = { Text("#FF5733") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    // Quick custom palettes
+                    Text("Presets:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.secondary)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("#FF5733", "#FFD700", "#FF1493", "#00FFFF", "#800080").forEach { col ->
+                            Box(
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .background(Color(android.graphics.Color.parseColor(col)), CircleShape)
+                                    .border(1.dp, Color.LightGray, CircleShape)
+                                    .clickable {
+                                        customColorHexInput = col
+                                    }
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val cleaned = customColorHexInput.trim()
+                        if (cleaned.isNotBlank()) {
+                            val hexToApply = if (cleaned.startsWith("#")) cleaned else "#$cleaned"
+                            try {
+                                android.graphics.Color.parseColor(hexToApply)
+                                selectedColor = hexToApply
+                                isEraserMode = false
+                                showColorHelpDialog = false
+                            } catch (e: Exception) {
+                                viewModel.triggerFeedback("Invalid Hex color. Use format like #FF5733.")
+                            }
+                        }
+                    }
+                ) {
+                    Text("Apply")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showColorHelpDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+}
+
+// --- Background and Drawing Helpers for Canvas Rendering ---
+fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCanvasTemplateBackground(template: String, size: androidx.compose.ui.geometry.Size) {
+    when (template) {
+        "white" -> {
+            drawRect(Color(0xFFFAF9F6)) // Warm Alabaster White
+        }
+        "lined" -> {
+            drawRect(Color(0xFFFAF9F6))
+            // Vertical margin line
+            val leftMargin = size.width * 0.12f
+            drawLine(
+                color = Color(0xFFFFB6B6),
+                start = Offset(leftMargin, 0f),
+                end = Offset(leftMargin, size.height),
+                strokeWidth = 2f
+            )
+            // Horizontal lines
+            var lineY = size.height * 0.08f
+            while (lineY < size.height) {
+                drawLine(
+                    color = Color(0xFFD4E2F5),
+                    start = Offset(0f, lineY),
+                    end = Offset(size.width, lineY),
+                    strokeWidth = 1.5f
+                )
+                lineY += size.height * 0.08f
+            }
+        }
+        "graph" -> {
+            drawRect(Color(0xFFF3F7F9))
+            val stepX = size.width * 0.05f
+            var x = stepX
+            while (x < size.width) {
+                drawLine(
+                    color = Color(0xFFE2EBF0),
+                    start = Offset(x, 0f),
+                    end = Offset(x, size.height),
+                    strokeWidth = 1f
+                )
+                x += stepX
+            }
+            val stepY = size.height * 0.10f
+            var y = stepY
+            while (y < size.height) {
+                drawLine(
+                    color = Color(0xFFE2EBF0),
+                    start = Offset(0f, y),
+                    end = Offset(size.width, y),
+                    strokeWidth = 1f
+                )
+                y += stepY
+            }
+        }
+        "slate" -> {
+            drawRect(Color(0xFF1E293B)) // Deep Slate Blue Dark
+            // Draw neat dotted patterns
+            val stepX = size.width * 0.05f
+            val stepY = size.height * 0.10f
+            var x = stepX
+            while (x < size.width) {
+                var y = stepY
+                while (y < size.height) {
+                    drawCircle(
+                        color = Color(0xFF475569),
+                        radius = 2f,
+                        center = Offset(x, y)
+                    )
+                    y += stepY
+                }
+                x += stepX
+            }
+        }
+    }
+}
+
+fun androidx.compose.ui.graphics.drawscope.DrawScope.drawStroke(stroke: CanvasStroke, size: androidx.compose.ui.geometry.Size) {
+    val points = stroke.points
+    if (points.isEmpty()) return
+
+    val baseColor = try {
+        Color(android.graphics.Color.parseColor(stroke.colorHex))
+    } catch (e: Exception) {
+        Color.Black
+    }
+
+    val drawColor = if (stroke.penType == "highlighter") {
+        baseColor.copy(alpha = 0.35f)
+    } else {
+        baseColor
+    }
+
+    val path = Path()
+    val first = points.first()
+    path.moveTo(first.x * size.width, first.y * size.height)
+
+    if (points.size > 1) {
+        for (i in 1 until points.size) {
+            val p = points[i]
+            val prev = points[i - 1]
+            val midX = (prev.x + p.x) / 2f
+            val midY = (prev.y + p.y) / 2f
+            path.quadraticTo(
+                prev.x * size.width,
+                prev.y * size.height,
+                midX * size.width,
+                midY * size.height
+            )
+        }
+        val last = points.last()
+        path.lineTo(last.x * size.width, last.y * size.height)
+    }
+
+    val finalThickness = if (stroke.penType == "highlighter") {
+        stroke.thickness * 4.5f
+    } else {
+        stroke.thickness
+    }
+
+    val pathEffect = if (stroke.penType == "dashed") {
+        androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(15f, 15f), 0f)
+    } else {
+        null
+    }
+
+    if (stroke.penType == "calligraphy") {
+        drawPath(
+            path = path,
+            color = drawColor,
+            style = Stroke(
+                width = finalThickness * 1.3f,
+                cap = StrokeCap.Square,
+                join = StrokeJoin.Miter,
+                pathEffect = pathEffect
+            )
+        )
+        // Overlapping offset brush layer
+        val offsetPath = Path()
+        offsetPath.moveTo(first.x * size.width + 1.5f, first.y * size.height + 1.5f)
+        if (points.size > 1) {
+            for (i in 1 until points.size) {
+                val p = points[i]
+                val prev = points[i - 1]
+                val midX = ((prev.x + p.x) / 2f) * size.width + 1.5f
+                val midY = ((prev.y + p.y) / 2f) * size.height + 1.5f
+                offsetPath.quadraticTo(
+                    prev.x * size.width + 1.5f,
+                    prev.y * size.height + 1.5f,
+                    midX,
+                    midY
+                )
+            }
+            offsetPath.lineTo(points.last().x * size.width + 1.5f, points.last().y * size.height + 1.5f)
+        }
+        drawPath(
+            path = offsetPath,
+            color = drawColor.copy(alpha = 0.7f),
+            style = Stroke(
+                width = finalThickness * 0.7f,
+                cap = StrokeCap.Square,
+                join = StrokeJoin.Miter
+            )
+        )
+    } else {
+        drawPath(
+            path = path,
+            color = drawColor,
+            style = Stroke(
+                width = finalThickness,
+                cap = StrokeCap.Round,
+                join = StrokeJoin.Round,
+                pathEffect = pathEffect
+            )
+        )
     }
 }
 
@@ -1563,7 +2399,8 @@ fun SignatureStudioScreen(
 @Composable
 fun CameraPreviewView(
     modifier: Modifier = Modifier,
-    onImageCaptureCreated: (ImageCapture) -> Unit
+    onImageCaptureCreated: (ImageCapture) -> Unit,
+    onCornersDetected: (List<android.graphics.PointF>?) -> Unit
 ) {
     val context = LocalContext.current
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
@@ -1584,6 +2421,15 @@ fun CameraPreviewView(
                     .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
                     .build()
 
+                val imageAnalyzer = ImageAnalysis.Builder()
+                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                    .build()
+
+                imageAnalyzer.setAnalyzer(
+                    ContextCompat.getMainExecutor(context),
+                    DocumentAnalyzer(onCornersDetected)
+                )
+
                 onImageCaptureCreated(imageCapture)
 
                 val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
@@ -1594,7 +2440,8 @@ fun CameraPreviewView(
                         lifecycleOwner,
                         cameraSelector,
                         preview,
-                        imageCapture
+                        imageCapture,
+                        imageAnalyzer
                     )
                 } catch (exc: Exception) {
                     android.util.Log.e("CameraPreviewView", "Use case binding failed", exc)
@@ -1602,6 +2449,60 @@ fun CameraPreviewView(
             }, ContextCompat.getMainExecutor(context))
         }
     )
+}
+
+class DocumentAnalyzer(private val onCornersDetected: (List<android.graphics.PointF>?) -> Unit) : ImageAnalysis.Analyzer {
+    override fun analyze(image: ImageProxy) {
+        val rotationDegrees = image.imageInfo.rotationDegrees
+        val yBuffer = image.planes[0].buffer
+        val ySize = yBuffer.remaining()
+        val yArray = ByteArray(ySize)
+        yBuffer.get(yArray)
+        
+        val width = image.width
+        val height = image.height
+        
+        // Downscale luma frame for ultra-fast, low-latency processing
+        val scaledW = 160
+        val scaledH = (scaledW * (height.toFloat() / width.toFloat())).toInt()
+        
+        val lumaBitmap = Bitmap.createBitmap(scaledW, scaledH, Bitmap.Config.ARGB_8888)
+        val pixels = IntArray(scaledW * scaledH)
+        
+        val scaleX = width.toFloat() / scaledW
+        val scaleY = height.toFloat() / scaledH
+        
+        for (y in 0 until scaledH) {
+            for (x in 0 until scaledW) {
+                val origX = (x * scaleX).toInt().coerceIn(0, width - 1)
+                val origY = (y * scaleY).toInt().coerceIn(0, height - 1)
+                val yIndex = origY * width + origX
+                if (yIndex < ySize) {
+                    val luma = yArray[yIndex].toInt() and 0xFF
+                    pixels[y * scaledW + x] = (0xFF shl 24) or (luma shl 16) or (luma shl 8) or luma
+                }
+            }
+        }
+        lumaBitmap.setPixels(pixels, 0, scaledW, 0, 0, scaledW, scaledH)
+        
+        val rotatedBitmap = if (rotationDegrees != 0) {
+            val matrix = android.graphics.Matrix().apply { postRotate(rotationDegrees.toFloat()) }
+            Bitmap.createBitmap(lumaBitmap, 0, 0, scaledW, scaledH, matrix, true)
+        } else {
+            lumaBitmap
+        }
+        
+        val rawCorners = DocumentProcessor.detectCorners(rotatedBitmap)
+        val rw = rotatedBitmap.width.toFloat()
+        val rh = rotatedBitmap.height.toFloat()
+        val normalized = rawCorners.map { android.graphics.PointF(it.x / rw, it.y / rh) }
+        
+        onCornersDetected(normalized)
+        
+        if (rotatedBitmap != lumaBitmap) rotatedBitmap.recycle()
+        lumaBitmap.recycle()
+        image.close()
+    }
 }
 
 fun imageProxyToBitmap(image: ImageProxy): Bitmap? {
@@ -1692,7 +2593,7 @@ fun ScannerScreen(
                         }
                     } else {
                         viewModel.captureScannerStep(selectedBmp, isImported = true)
-                        viewModel.triggerFeedback("Photo imported successfully! Tap DONE below or on the right to proceed to Crop Studio.")
+                        viewModel.triggerFeedback("Photo imported successfully! Tap SAVE below to compile scanned page directly.")
                     }
                 } else {
                     Toast.makeText(context, "Unable to load image. File may be corrupted.", Toast.LENGTH_LONG).show()
@@ -1704,6 +2605,74 @@ fun ScannerScreen(
     }
 
     var guideStatusText by remember { mutableStateOf("Hold steady. Align card edges inside bounding frame.") }
+
+    var detectedCorners by remember { mutableStateOf<List<android.graphics.PointF>?>(null) }
+    var smoothedCorners by remember { mutableStateOf<List<android.graphics.PointF>?>(null) }
+
+    val onSnapPage = {
+        if (liveCameraMode && hasCameraPermission && imageCapture != null) {
+            val capture = imageCapture
+            if (capture != null) {
+                capture.takePicture(
+                    ContextCompat.getMainExecutor(context),
+                    object : ImageCapture.OnImageCapturedCallback() {
+                        override fun onCaptureSuccess(image: ImageProxy) {
+                            val bitmap = imageProxyToBitmap(image)
+                            image.close()
+                            if (bitmap != null) {
+                                if (state.scannerIdMode) {
+                                    if (!isFrontScapped) {
+                                        viewModel.captureScannerStep(bitmap)
+                                        draftFrontBitmap = bitmap
+                                        isFrontScapped = true
+                                        guideStatusText = "Front side captured! Now scan the Back Side."
+                                    } else {
+                                        val front = draftFrontBitmap ?: bitmap
+                                        viewModel.saveIdentityCardFrontBack(front, bitmap)
+                                        isFrontScapped = false
+                                        Toast.makeText(context, "Identity Card Compiled!", Toast.LENGTH_SHORT).show()
+                                    }
+                                } else {
+                                    viewModel.captureScannerStep(bitmap)
+                                    viewModel.triggerFeedback("Page captured! Tap SAVE below to compile scanned document.")
+                                }
+                            } else {
+                                val mock = createMockScannedDocSheet(state.scannerStepBitmaps.size + 1)
+                                viewModel.captureScannerStep(mock)
+                                viewModel.triggerFeedback("Page captured (Sandbox Fallback)! Tap SAVE below to compile.")
+                            }
+                        }
+
+                        override fun onError(exception: ImageCaptureException) {
+                            val mock = createMockScannedDocSheet(state.scannerStepBitmaps.size + 1)
+                            viewModel.captureScannerStep(mock)
+                            viewModel.triggerFeedback("Page captured (Fallback Mode)! Tap SAVE below to compile.")
+                        }
+                    }
+                )
+            }
+        } else {
+            if (state.scannerIdMode) {
+                if (!isFrontScapped) {
+                    val simulatedFront = createMockIdentityCard(isFront = true)
+                    viewModel.captureScannerStep(simulatedFront)
+                    draftFrontBitmap = simulatedFront
+                    isFrontScapped = true
+                    guideStatusText = "Front captured in Sandbox. Now trigger click for back side."
+                } else {
+                    val simulatedBack = createMockIdentityCard(isFront = false)
+                    val front = draftFrontBitmap ?: createMockIdentityCard(isFront = true)
+                    viewModel.saveIdentityCardFrontBack(front, simulatedBack)
+                    isFrontScapped = false
+                    Toast.makeText(context, "ID Card PDF Compiled in Sandbox Mode!", Toast.LENGTH_SHORT).show()
+                }
+            } else {
+                val simulatedDoc = createMockScannedDocSheet(pageIndex = state.scannerStepBitmaps.size + 1)
+                viewModel.captureScannerStep(simulatedDoc)
+                viewModel.triggerFeedback("Page captured (Sandbox Mock)! Tap SAVE below to compile.")
+            }
+        }
+    }
 
     // Dynamic laser sweep animation
     val infiniteTransition = rememberInfiniteTransition(label = "Laser")
@@ -1779,8 +2748,79 @@ fun ScannerScreen(
                         Box(modifier = Modifier.fillMaxSize()) {
                             CameraPreviewView(
                                 modifier = Modifier.fillMaxSize(),
-                                onImageCaptureCreated = { imageCapture = it }
+                                onImageCaptureCreated = { imageCapture = it },
+                                onCornersDetected = { raw ->
+                                    detectedCorners = raw
+                                }
                             )
+
+                            // Smooth the corners over consecutive frames to prevent jitter
+                            LaunchedEffect(detectedCorners) {
+                                val raw = detectedCorners
+                                if (raw != null && raw.size == 4) {
+                                    val current = smoothedCorners
+                                    if (current == null || current.size != 4) {
+                                        smoothedCorners = raw
+                                    } else {
+                                        smoothedCorners = List(4) { idx ->
+                                            val r = raw[idx]
+                                            val c = current[idx]
+                                            android.graphics.PointF(
+                                                c.x * 0.7f + r.x * 0.3f,
+                                                c.y * 0.7f + r.y * 0.3f
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Dynamic high-precision neon corner overlay canvas
+                            smoothedCorners?.let { corners ->
+                                Canvas(modifier = Modifier.fillMaxSize()) {
+                                    val points = corners.map { 
+                                        Offset(it.x * size.width, it.y * size.height)
+                                    }
+                                    
+                                    val path = Path().apply {
+                                        moveTo(points[0].x, points[0].y)
+                                        lineTo(points[1].x, points[1].y)
+                                        lineTo(points[2].x, points[2].y)
+                                        lineTo(points[3].x, points[3].y)
+                                        close()
+                                    }
+                                    
+                                    // Highlighted translucent green document boundary area
+                                    drawPath(
+                                        path = path,
+                                        color = Color(0xFF10B981).copy(alpha = 0.18f)
+                                    )
+                                    
+                                    // High-tech glowing neon green border outline with dashed effects
+                                    drawPath(
+                                        path = path,
+                                        color = Color(0xFF10B981),
+                                        style = Stroke(
+                                            width = 6f,
+                                            pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(20f, 10f), 0f)
+                                        )
+                                    )
+                                    
+                                    // Pulse target circles around corners
+                                    points.forEach { pt ->
+                                        drawCircle(
+                                            color = Color.White,
+                                            radius = 16f,
+                                            center = pt
+                                        )
+                                        drawCircle(
+                                            color = Color(0xFF10B981),
+                                            radius = 24f,
+                                            center = pt,
+                                            style = Stroke(width = 4f)
+                                        )
+                                    }
+                                }
+                            }
 
                             // Superimposed laser beam scanner
                             Box(
@@ -1907,7 +2947,7 @@ fun ScannerScreen(
                                         onClick = {
                                             val doc = createMockScannedDocSheet(state.scannerStepBitmaps.size + 1)
                                             viewModel.captureScannerStep(doc)
-                                            viewModel.navigateTo(Screen.ScanEdit)
+                                            viewModel.triggerFeedback("Receipt loaded! Tap SAVE below to compile.")
                                         },
                                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B)),
                                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
@@ -1926,7 +2966,7 @@ fun ScannerScreen(
                                                 guideStatusText = "Loaded ID Card Front Side!"
                                             } else {
                                                 viewModel.captureScannerStep(card)
-                                                viewModel.navigateTo(Screen.ScanEdit)
+                                                viewModel.triggerFeedback("ID Card loaded! Tap SAVE below to compile.")
                                             }
                                         },
                                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B)),
@@ -2016,74 +3056,7 @@ fun ScannerScreen(
 
                     // Main Capture Trigger
                     Button(
-                        onClick = {
-                            if (liveCameraMode && hasCameraPermission && imageCapture != null) {
-                                // Real Camera Capture implementation
-                                val capture = imageCapture
-                                if (capture != null) {
-                                    capture.takePicture(
-                                        ContextCompat.getMainExecutor(context),
-                                        object : ImageCapture.OnImageCapturedCallback() {
-                                            override fun onCaptureSuccess(image: ImageProxy) {
-                                                val bitmap = imageProxyToBitmap(image)
-                                                image.close()
-                                                if (bitmap != null) {
-                                                    if (state.scannerIdMode) {
-                                                        if (!isFrontScapped) {
-                                                            viewModel.captureScannerStep(bitmap)
-                                                            draftFrontBitmap = bitmap
-                                                            isFrontScapped = true
-                                                            guideStatusText = "Front side captured! Now scan the Back Side."
-                                                        } else {
-                                                            val front = draftFrontBitmap ?: bitmap
-                                                            viewModel.saveIdentityCardFrontBack(front, bitmap)
-                                                            isFrontScapped = false
-                                                            Toast.makeText(context, "Identity Card Compiled!", Toast.LENGTH_SHORT).show()
-                                                        }
-                                                    } else {
-                                                        viewModel.captureScannerStep(bitmap)
-                                                        viewModel.navigateTo(Screen.ScanEdit)
-                                                    }
-                                                } else {
-                                                    // Quick fallback if image proxy conversion was blank
-                                                    val mock = createMockScannedDocSheet(state.scannerStepBitmaps.size + 1)
-                                                    viewModel.captureScannerStep(mock)
-                                                    viewModel.navigateTo(Screen.ScanEdit)
-                                                }
-                                            }
-
-                                            override fun onError(exception: ImageCaptureException) {
-                                                // Fallback on fail
-                                                val mock = createMockScannedDocSheet(state.scannerStepBitmaps.size + 1)
-                                                viewModel.captureScannerStep(mock)
-                                                viewModel.navigateTo(Screen.ScanEdit)
-                                            }
-                                        }
-                                    )
-                                }
-                            } else {
-                                // Sandbox Mock Capture Mode
-                                if (state.scannerIdMode) {
-                                    if (!isFrontScapped) {
-                                        val simulatedFront = createMockIdentityCard(isFront = true)
-                                        viewModel.captureScannerStep(simulatedFront)
-                                        draftFrontBitmap = simulatedFront
-                                        isFrontScapped = true
-                                        guideStatusText = "Front captured in Sandbox. Now trigger click for back side."
-                                    } else {
-                                        val simulatedBack = createMockIdentityCard(isFront = false)
-                                        val front = draftFrontBitmap ?: createMockIdentityCard(isFront = true)
-                                        viewModel.saveIdentityCardFrontBack(front, simulatedBack)
-                                        isFrontScapped = false
-                                        Toast.makeText(context, "ID Card PDF Compiled in Sandbox Mode!", Toast.LENGTH_SHORT).show()
-                                    }
-                                } else {
-                                    val simulatedDoc = createMockScannedDocSheet(pageIndex = state.scannerStepBitmaps.size + 1)
-                                    viewModel.captureScannerStep(simulatedDoc)
-                                    viewModel.navigateTo(Screen.ScanEdit)
-                                }
-                            }
-                        },
+                        onClick = { onSnapPage() },
                         colors = ButtonDefaults.buttonColors(
                             containerColor = if (liveCameraMode) Color.Green else Color(0xFF0284C7)
                         ),
@@ -2109,19 +3082,22 @@ fun ScannerScreen(
                         )
                     }
 
-                    // Elegant "Done" button to proceed directly to the Crop Studio
+                    // Elegant "Save" button to directly compile and save the document
                     if (state.scannerStepBitmaps.isNotEmpty()) {
                         Button(
-                            onClick = { viewModel.navigateTo(Screen.ScanEdit) },
+                            onClick = {
+                                val timestamp = System.currentTimeMillis() % 1000
+                                viewModel.compileScannedDoc("Quick Scan $timestamp")
+                            },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10AC84)),
                             shape = CircleShape,
                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                             modifier = Modifier
                                 .height(54.dp)
                                 .widthIn(min = 80.dp)
-                                .testTag("scanner_done_button")
+                                .testTag("scanner_save_button")
                         ) {
-                            Text("DONE", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text("SAVE", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         }
                     } else {
                         Spacer(modifier = Modifier.size(54.dp))
@@ -2210,12 +3186,15 @@ fun ScanEditScreen(
         }
     }
 
-    LaunchedEffect(isCropping) {
-        if (isCropping) {
-            cropLeft = 0.05f
-            cropTop = 0.05f
-            cropRight = 0.95f
-            cropBottom = 0.95f
+    LaunchedEffect(isCropping, state.scannerStepBitmaps) {
+        if (isCropping && state.scannerStepBitmaps.isNotEmpty()) {
+            val activeBitmap = state.scannerStepBitmaps.first()
+            val targetRatio = activeBitmap.width.toFloat() / activeBitmap.height.toFloat()
+            val result = com.example.data.DocumentProcessor.calculateRuleOfThirdsCrop(activeBitmap, targetRatio)
+            cropLeft = result.left
+            cropTop = result.top
+            cropRight = result.right
+            cropBottom = result.bottom
             activeRatioPreset = "free"
         }
     }
@@ -2277,14 +3256,14 @@ fun ScanEditScreen(
                     val bitmapHeight = activeBitmap.height.toFloat()
 
                     Text(
-                        text = "Drag corners to resize, drag center to position. Lock aspect ratio using presets.",
+                        text = "Composition-guided crop: Grid line intersections represent the Rule of Thirds. Lock ratio with presets.",
                         color = Color.White.copy(alpha = 0.7f),
-                        fontSize = 12.sp,
+                        fontSize = 11.sp,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                         modifier = Modifier.padding(bottom = 8.dp)
                     )
 
-                    // Aspect ratio presets selector row
+                    // Aspect ratio presets selector row (1:1, 4:3, 16:9 standard locked ratios)
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         modifier = Modifier.padding(bottom = 12.dp)
@@ -2292,39 +3271,25 @@ fun ScanEditScreen(
                         val presets = listOf(
                             "Free" to "free",
                             "Square 1:1" to "1:1",
-                            "Landscape 16:9" to "16:9",
-                            "Portrait 4:5" to "4:5"
+                            "Classic 4:3" to "4:3",
+                            "Widescreen 16:9" to "16:9"
                         )
                         presets.forEach { (label, preset) ->
                             val selected = activeRatioPreset == preset
                             Button(
                                 onClick = {
                                     activeRatioPreset = preset
-                                    if (preset != "free") {
-                                        val ratio = when (preset) {
-                                            "1:1" -> 1.0f
-                                            "16:9" -> 16f / 9f
-                                            "4:5" -> 0.8f
-                                            else -> 1.0f
-                                        }
-                                        val imageRatio = bitmapWidth / bitmapHeight
-                                        
-                                        if (imageRatio > ratio) {
-                                            val finalHeight = 0.8f
-                                            val finalWidth = ratio * finalHeight * (bitmapHeight / bitmapWidth)
-                                            cropLeft = ((1f - finalWidth) / 2f).coerceIn(0f, 1f)
-                                            cropRight = (cropLeft + finalWidth).coerceIn(0f, 1f)
-                                            cropTop = 0.1f
-                                            cropBottom = 0.9f
-                                        } else {
-                                            val finalWidth = 0.8f
-                                            val finalHeight = finalWidth / (ratio * (bitmapHeight / bitmapWidth))
-                                            cropLeft = 0.1f
-                                            cropRight = 0.9f
-                                            cropTop = ((1f - finalHeight) / 2f).coerceIn(0f, 1f)
-                                            cropBottom = (cropTop + finalHeight).coerceIn(0f, 1f)
-                                        }
+                                    val ratio = when (preset) {
+                                        "1:1" -> 1.0f
+                                        "16:9" -> 16f / 9f
+                                        "4:3" -> 4f / 3f
+                                        else -> bitmapWidth / bitmapHeight
                                     }
+                                    val result = com.example.data.DocumentProcessor.calculateRuleOfThirdsCrop(activeBitmap, ratio)
+                                    cropLeft = result.left
+                                    cropTop = result.top
+                                    cropRight = result.right
+                                    cropBottom = result.bottom
                                 },
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = if (selected) Color(0xFF10AC84) else Color(0xFF1E293B),
@@ -2397,6 +3362,42 @@ fun ScanEditScreen(
                                 close()
                             }
                             drawPath(cropBoxPath, color = Color(0xFF10AC84), style = Stroke(width = 5f))
+
+                            // Draw Rule of Thirds 3x3 Grid inside the cropping box
+                            val boxW = p2.x - p1.x
+                            val boxH = p4.y - p1.y
+                            
+                            // Vertical grid lines
+                            drawLine(
+                                color = Color.White.copy(alpha = 0.5f),
+                                start = Offset(p1.x + boxW / 3f, p1.y),
+                                end = Offset(p1.x + boxW / 3f, p4.y),
+                                strokeWidth = 2f,
+                                pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(12f, 12f), 0f)
+                            )
+                            drawLine(
+                                color = Color.White.copy(alpha = 0.5f),
+                                start = Offset(p1.x + 2f * boxW / 3f, p1.y),
+                                end = Offset(p1.x + 2f * boxW / 3f, p4.y),
+                                strokeWidth = 2f,
+                                pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(12f, 12f), 0f)
+                            )
+                            
+                            // Horizontal grid lines
+                            drawLine(
+                                color = Color.White.copy(alpha = 0.5f),
+                                start = Offset(p1.x, p1.y + boxH / 3f),
+                                end = Offset(p2.x, p1.y + boxH / 3f),
+                                strokeWidth = 2f,
+                                pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(12f, 12f), 0f)
+                            )
+                            drawLine(
+                                color = Color.White.copy(alpha = 0.5f),
+                                start = Offset(p1.x, p1.y + 2f * boxH / 3f),
+                                end = Offset(p2.x, p1.y + 2f * boxH / 3f),
+                                strokeWidth = 2f,
+                                pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(12f, 12f), 0f)
+                            )
 
                             // Draw high contrast visual corner handles
                             drawCircle(Color.White, 20f, p1)
@@ -2476,7 +3477,7 @@ fun ScanEditScreen(
                                             val targetRatio = when (activeRatioPreset) {
                                                 "1:1" -> 1.0f
                                                 "16:9" -> 16f / 9f
-                                                "4:5" -> 0.8f
+                                                "4:3" -> 4f / 3f
                                                 else -> 1.0f
                                             }
                                             var newLeft = (cropLeft + dx).coerceIn(0f, cropRight - 0.05f)
@@ -2524,7 +3525,7 @@ fun ScanEditScreen(
                                             val targetRatio = when (activeRatioPreset) {
                                                 "1:1" -> 1.0f
                                                 "16:9" -> 16f / 9f
-                                                "4:5" -> 0.8f
+                                                "4:3" -> 4f / 3f
                                                 else -> 1.0f
                                             }
                                             var newRight = (cropRight + dx).coerceIn(cropLeft + 0.05f, 1f)
@@ -2572,7 +3573,7 @@ fun ScanEditScreen(
                                             val targetRatio = when (activeRatioPreset) {
                                                 "1:1" -> 1.0f
                                                 "16:9" -> 16f / 9f
-                                                "4:5" -> 0.8f
+                                                "4:3" -> 4f / 3f
                                                 else -> 1.0f
                                             }
                                             var newRight = (cropRight + dx).coerceIn(cropLeft + 0.05f, 1f)
@@ -2620,7 +3621,7 @@ fun ScanEditScreen(
                                             val targetRatio = when (activeRatioPreset) {
                                                 "1:1" -> 1.0f
                                                 "16:9" -> 16f / 9f
-                                                "4:5" -> 0.8f
+                                                "4:3" -> 4f / 3f
                                                 else -> 1.0f
                                             }
                                             var newLeft = (cropLeft + dx).coerceIn(0f, cropRight - 0.05f)
@@ -2955,6 +3956,15 @@ fun EditorScreen(
     state: UiState,
     viewModel: MainViewModel
 ) {
+    EditorScreenRemoved(state, viewModel)
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun EditorScreenRemoved(
+    state: UiState,
+    viewModel: MainViewModel
+) {
     val activeDoc = state.activeDocument ?: return
     val context = LocalContext.current
     val pages = state.activeDocumentContent.pages
@@ -2976,8 +3986,15 @@ fun EditorScreen(
     var textStickerDraft by remember { mutableStateOf("") }
     var isAddingTextMode by remember { mutableStateOf(false) }
  
+    var showPreciseTextPlacementDialog by remember { mutableStateOf(false) }
+    var precisePageNumberText by remember { mutableStateOf("") }
+    var preciseXText by remember { mutableStateOf("0.50") }
+    var preciseYText by remember { mutableStateOf("0.50") }
+    var preciseTextContent by remember { mutableStateOf("New Independent Text Annotation") }
+
     var showEditWordDialog by remember { mutableStateOf(false) }
     var selectedWordToEdit by remember { mutableStateOf<TextAnnotationDef?>(null) }
+    var selectedAnnotationId by remember { mutableStateOf<String?>(null) }
     var editWordTextDraft by remember { mutableStateOf("") }
  
     var showAddWordDialog by remember { mutableStateOf(false) }
@@ -3017,6 +4034,7 @@ fun EditorScreen(
         currentDrawings.colorsSync(activePage.drawings)
         currentTextAnns.annotationSync(activePage.textAnnotations)
         currentSignatures.signatureSync(activePage.signatures)
+        selectedAnnotationId = null
     }
 
     // Pan, Zoom, Rotate and Aspect orientation states
@@ -3026,6 +4044,8 @@ fun EditorScreen(
     var offsetY by remember(activePage.id) { mutableStateOf(0f) }
     var pageMeasuredWidthPx by remember(activePage.id) { mutableStateOf(400f) }
     var pageMeasuredHeightPx by remember(activePage.id) { mutableStateOf(600f) }
+    var pagePositionOnScreenX by remember(activePage.id) { mutableStateOf(0f) }
+    var pagePositionOnScreenY by remember(activePage.id) { mutableStateOf(0f) }
     var pageRotationDegrees by remember(activePage.id) { mutableStateOf(activePage.rotationDegrees) }
     var isHorizontalOverride by remember(activePage.id) { mutableStateOf<Boolean?>(null) }
 
@@ -3059,23 +4079,35 @@ fun EditorScreen(
 
     val coroutineScope = rememberCoroutineScope()
 
+    var activeEditorTab by remember { mutableStateOf("view") }
+    var isPresentationMode by remember { mutableStateOf(false) }
+    var isContinuousScrollMode by remember { mutableStateOf(false) }
+
     Scaffold(
         topBar = {
-            Column(
-                modifier = Modifier
-                    .background(MaterialTheme.colorScheme.surface)
-                    .fillMaxWidth()
+            Surface(
+                tonalElevation = 4.dp,
+                shadowElevation = 4.dp,
+                modifier = Modifier.fillMaxWidth()
             ) {
                 CenterAlignedTopAppBar(
                     title = {
-                        Text(
-                            text = activeDoc.title,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = activeDoc.title,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Page ${pages.indexOf(activePage) + 1} of ${pages.size}",
+                                fontSize = 10.sp,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
                     },
                     navigationIcon = {
                         IconButton(
@@ -3091,34 +4123,33 @@ fun EditorScreen(
                         }
                     },
                     actions = {
-                        // Smart Word Auto-Detector Trigger
+                        // Undo action
                         IconButton(
-                            onClick = { viewModel.autoDetectPageWords() }
-                        ) {
-                            Icon(Icons.Default.DocumentScanner, "Auto-Detect Words", tint = MaterialTheme.colorScheme.tertiary)
-                        }
-                        // Page Workbench Toggle Button
-                        IconButton(
-                            onClick = { showPageWorkbench = !showPageWorkbench }
+                            onClick = { viewModel.undo() },
+                            enabled = viewModel.canUndo()
                         ) {
                             Icon(
-                                imageVector = Icons.Default.ViewAgenda,
-                                contentDescription = "Toggle Page Workbench",
-                                tint = if (showPageWorkbench) MaterialTheme.colorScheme.secondary else Color.Gray
+                                imageVector = Icons.AutoMirrored.Filled.Undo,
+                                contentDescription = "Undo",
+                                tint = if (viewModel.canUndo()) MaterialTheme.colorScheme.primary else Color.Gray.copy(alpha = 0.5f)
                             )
                         }
 
-                        Button(
-                            onClick = {
-                                viewModel.saveEditorChanges()
-                                viewModel.navigateTo(Screen.Dashboard)
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                        // Redo action
+                        IconButton(
+                            onClick = { viewModel.redo() },
+                            enabled = viewModel.canRedo()
                         ) {
-                            Icon(Icons.Default.Save, "Save changes", modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Save", fontSize = 12.sp)
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.Redo,
+                                contentDescription = "Redo",
+                                tint = if (viewModel.canRedo()) MaterialTheme.colorScheme.primary else Color.Gray.copy(alpha = 0.5f)
+                            )
                         }
+
+                        Spacer(modifier = Modifier.width(4.dp))
+
+                        // Quick Share
                         IconButton(
                             onClick = {
                                 viewModel.saveEditorChanges()
@@ -3126,7 +4157,23 @@ fun EditorScreen(
                                 viewModel.navigateTo(Screen.Dashboard)
                             }
                         ) {
-                            Icon(Icons.Default.Share, "Send PDF", tint = MaterialTheme.colorScheme.primary)
+                            Icon(Icons.Default.Share, "Share PDF", tint = MaterialTheme.colorScheme.primary)
+                        }
+
+                        // Save & Close
+                        Button(
+                            onClick = {
+                                viewModel.saveEditorChanges()
+                                viewModel.navigateTo(Screen.Dashboard)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                            modifier = Modifier.padding(end = 8.dp)
+                        ) {
+                            Icon(Icons.Default.Save, "Save Changes", modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Save", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 )
@@ -3138,160 +4185,631 @@ fun EditorScreen(
                     .fillMaxWidth()
                     .background(MaterialTheme.colorScheme.surface)
             ) {
-                if (annotationMode == "draw") {
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        tonalElevation = 2.dp,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                // 1. CONTEXTUAL OPTIONS PANEL FOR CURRENTLY ACTIVE TAB
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    tonalElevation = 2.dp,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 10.dp)
                     ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            // Row 1: Shapes/Tools Selectors + Selected status / deletion
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                // Tools selector
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                        when (activeEditorTab) {
+                            "view" -> {
+                                Column(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
-                                    Text("Tool: ", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    listOf(
-                                        "brush" to Icons.Default.Gesture,
-                                        "line" to Icons.Default.Remove,
-                                        "box" to Icons.Default.BorderOuter,
-                                        "circle" to Icons.Default.Lens,
-                                        "select" to Icons.Default.OpenWith
-                                    ).forEach { (type, icon) ->
-                                        FilledIconButton(
-                                            onClick = {
-                                                drawShapeType = type
-                                                if (type != "select") {
-                                                    selectedDrawingId = null
-                                                }
-                                            },
-                                            modifier = Modifier.size(32.dp),
-                                            colors = IconButtonDefaults.filledIconButtonColors(
-                                                containerColor = if (drawShapeType == type) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                                                contentColor = if (drawShapeType == type) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column {
+                                            Text("PREVIEW SETTINGS & DISPLAY", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, letterSpacing = 0.5.sp)
+                                            Text("Manage display viewport settings and continuous flow layouts", fontSize = 10.sp, color = Color.Gray)
+                                        }
+                                        
+                                        Surface(
+                                            color = MaterialTheme.colorScheme.surfaceVariant,
+                                            shape = RoundedCornerShape(4.dp)
                                         ) {
-                                            Icon(icon, contentDescription = type, modifier = Modifier.size(16.dp))
+                                            Text(
+                                                text = "${pages.size} PAGES DETECTED",
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+                                    
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        // Single Page focus tab
+                                        FilterChip(
+                                            selected = !isContinuousScrollMode,
+                                            onClick = { isContinuousScrollMode = false },
+                                            label = { Text("Single Page", fontSize = 10.sp, fontWeight = FontWeight.Bold) },
+                                            leadingIcon = {
+                                                Icon(
+                                                    imageVector = Icons.Default.Description,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(12.dp)
+                                                )
+                                            },
+                                            shape = RoundedCornerShape(6.dp)
+                                        )
+
+                                        // Continuous flow view tab
+                                        FilterChip(
+                                            selected = isContinuousScrollMode,
+                                            onClick = { isContinuousScrollMode = true },
+                                            label = { Text("Continuous Scroll", fontSize = 10.sp, fontWeight = FontWeight.Bold) },
+                                            leadingIcon = {
+                                                Icon(
+                                                    imageVector = Icons.Default.ViewStream,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(12.dp)
+                                                )
+                                            },
+                                            shape = RoundedCornerShape(6.dp)
+                                        )
+
+                                        Spacer(modifier = Modifier.weight(1f))
+
+                                        // Fullscreen Presentation Mode Button
+                                        IconButton(
+                                            onClick = { isPresentationMode = true },
+                                            modifier = Modifier
+                                                .background(MaterialTheme.colorScheme.primaryContainer, CircleShape)
+                                                .size(28.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Fullscreen,
+                                                contentDescription = "Presentation Preview",
+                                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+
+                                        // Rotate 90
+                                        IconButton(
+                                            onClick = {
+                                                val newRotation = (pageRotationDegrees + 90) % 360
+                                                pageRotationDegrees = newRotation
+                                                viewModel.editActivePageRotation(newRotation)
+                                            },
+                                            modifier = Modifier
+                                                .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape)
+                                                .size(28.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.CropRotate,
+                                                contentDescription = "Rotate 90 degrees",
+                                                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+
+                                        // Delete Page
+                                        IconButton(
+                                            onClick = { showDeletePageConfirm = true },
+                                            modifier = Modifier
+                                                .background(MaterialTheme.colorScheme.errorContainer, CircleShape)
+                                                .size(28.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.DeleteForever,
+                                                contentDescription = "Remove page",
+                                                tint = MaterialTheme.colorScheme.onErrorContainer,
+                                                modifier = Modifier.size(16.dp)
+                                            )
                                         }
                                     }
                                 }
-
-                                // Delete selected shape button
-                                if (selectedDrawingId != null) {
-                                    Button(
-                                        onClick = {
-                                            val updated = currentDrawings.filter { it.id != selectedDrawingId }
-                                            currentDrawings.clear()
-                                            currentDrawings.addAll(updated)
-                                            viewModel.editActivePageDrawings(updated)
-                                            selectedDrawingId = null
-                                            viewModel.triggerFeedback("Shape deleted successfully.")
-                                        },
-                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                                        modifier = Modifier.height(28.dp),
-                                        shape = RoundedCornerShape(4.dp)
+                            }
+                            "annotate" -> {
+                                Column(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Icon(Icons.Default.Delete, contentDescription = "Delete Shape", modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onError)
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text("Delete", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onError)
+                                        Row(
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text("Tool: ", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            listOf(
+                                                "brush" to Icons.Default.Gesture,
+                                                "line" to Icons.Default.Remove,
+                                                "box" to Icons.Default.BorderOuter,
+                                                "circle" to Icons.Default.Lens,
+                                                "redact" to Icons.Default.Block,
+                                                "select" to Icons.Default.OpenWith
+                                            ).forEach { (type, icon) ->
+                                                FilledIconButton(
+                                                    onClick = {
+                                                        drawShapeType = type
+                                                        if (type != "select") {
+                                                            selectedDrawingId = null
+                                                        }
+                                                    },
+                                                    modifier = Modifier.size(32.dp),
+                                                    colors = IconButtonDefaults.filledIconButtonColors(
+                                                        containerColor = if (drawShapeType == type) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                                        contentColor = if (drawShapeType == type) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                ) {
+                                                    Icon(icon, contentDescription = type, modifier = Modifier.size(16.dp))
+                                                }
+                                            }
+                                        }
+
+                                        if (selectedDrawingId != null) {
+                                            Button(
+                                                onClick = {
+                                                    val updated = currentDrawings.filter { it.id != selectedDrawingId }
+                                                    currentDrawings.clear()
+                                                    currentDrawings.addAll(updated)
+                                                    viewModel.editActivePageDrawings(updated)
+                                                    selectedDrawingId = null
+                                                },
+                                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                                modifier = Modifier.height(28.dp),
+                                                shape = RoundedCornerShape(4.dp)
+                                            ) {
+                                                Icon(Icons.Default.Delete, contentDescription = "Delete Shape", modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onError)
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text("Delete Shape", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onError)
+                                            }
+                                        } else if (drawShapeType == "select") {
+                                            Text("Tap shape to select", fontSize = 10.sp, color = MaterialTheme.colorScheme.primary, fontStyle = FontStyle.Italic)
+                                        } else {
+                                            Text("Drag on canvas to draw", fontSize = 10.sp, color = Color.Gray)
+                                        }
                                     }
-                                } else if (drawShapeType == "select") {
-                                    Text("Tap shape on canvas to select", fontSize = 10.sp, color = MaterialTheme.colorScheme.primary, fontStyle = FontStyle.Italic)
-                                } else {
-                                    Text("Drag to draw ${drawShapeType}", fontSize = 10.sp, color = Color.Gray)
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text("Color: ", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        val colors = listOf(
+                                            "#EF4444" to Color(0xFFEF4444),
+                                            "#3B82F6" to Color(0xFF3B82F6),
+                                            "#10B981" to Color(0xFF10B981),
+                                            "#1E293B" to Color(0xFF1E293B),
+                                            "#F59E0B" to Color(0xFFF59E0B),
+                                            "#8B5CF6" to Color(0xFF8B5CF6)
+                                        )
+                                        Row(
+                                            modifier = Modifier.weight(1f),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            colors.forEach { (hex, col) ->
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(24.dp)
+                                                        .background(col, CircleShape)
+                                                        .border(
+                                                            width = if (drawColorHex.lowercase() == hex.lowercase()) 2.dp else 1.dp,
+                                                            color = if (drawColorHex.lowercase() == hex.lowercase()) MaterialTheme.colorScheme.onSurface else Color.LightGray.copy(alpha = 0.5f),
+                                                            shape = CircleShape
+                                                        )
+                                                        .clickable {
+                                                            drawColorHex = hex
+                                                            val selId = selectedDrawingId
+                                                            if (selId != null) {
+                                                                val idx = currentDrawings.indexOfFirst { it.id == selId }
+                                                                if (idx != -1) {
+                                                                    val updatedDraw = currentDrawings[idx].copy(colorHex = hex)
+                                                                    currentDrawings[idx] = updatedDraw
+                                                                    viewModel.editActivePageDrawings(currentDrawings.toList())
+                                                                }
+                                                            }
+                                                        }
+                                                )
+                                            }
+                                        }
+
+                                        Row(
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text("Size: ", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            listOf(3f to "3px", 6f to "6px", 12f to "12px", 24f to "24px").forEach { (sizeVal, name) ->
+                                                Box(
+                                                    modifier = Modifier
+                                                        .background(
+                                                            if (drawStrokeWidth == sizeVal) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else Color.Transparent,
+                                                            RoundedCornerShape(4.dp)
+                                                        )
+                                                        .border(
+                                                            1.dp,
+                                                            if (drawStrokeWidth == sizeVal) MaterialTheme.colorScheme.primary else Color.LightGray,
+                                                            RoundedCornerShape(4.dp)
+                                                        )
+                                                        .clickable {
+                                                            drawStrokeWidth = sizeVal
+                                                            val selId = selectedDrawingId
+                                                            if (selId != null) {
+                                                                val idx = currentDrawings.indexOfFirst { it.id == selId }
+                                                                if (idx != -1) {
+                                                                    val updatedDraw = currentDrawings[idx].copy(strokeWidth = sizeVal)
+                                                                    currentDrawings[idx] = updatedDraw
+                                                                    viewModel.editActivePageDrawings(currentDrawings.toList())
+                                                                }
+                                                            }
+                                                        }
+                                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                                ) {
+                                                    Text(name, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
-
-                            // Row 2: Colors Palette Selection
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("Color: ", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                val colors = listOf(
-                                    "#EF4444" to Color(0xFFEF4444),
-                                    "#3B82F6" to Color(0xFF3B82F6),
-                                    "#10B981" to Color(0xFF10B981),
-                                    "#1E293B" to Color(0xFF1E293B),
-                                    "#F59E0B" to Color(0xFFF59E0B),
-                                    "#8B5CF6" to Color(0xFF8B5CF6)
-                                )
+                            "text" -> {
                                 Row(
-                                    modifier = Modifier.weight(1f),
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    colors.forEach { (hex, col) ->
-                                        Box(
-                                            modifier = Modifier
-                                                .size(24.dp)
-                                                .background(col, CircleShape)
-                                                .border(
-                                                    width = if (drawColorHex.lowercase() == hex.lowercase()) 2.dp else 1.dp,
-                                                    color = if (drawColorHex.lowercase() == hex.lowercase()) MaterialTheme.colorScheme.onSurface else Color.LightGray.copy(alpha = 0.5f),
-                                                    shape = CircleShape
-                                                )
-                                                .clickable {
-                                                    drawColorHex = hex
-                                                    val selId = selectedDrawingId
-                                                    if (selId != null) {
-                                                        val idx = currentDrawings.indexOfFirst { it.id == selId }
-                                                        if (idx != -1) {
-                                                            val updatedDraw = currentDrawings[idx].copy(colorHex = hex)
-                                                            currentDrawings[idx] = updatedDraw
-                                                            viewModel.editActivePageDrawings(currentDrawings.toList())
-                                                        }
-                                                    }
-                                                }
-                                        )
-                                    }
-                                }
-
-                                // Thickness Selectors
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text("Size: ", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    listOf(3f to "3px", 6f to "6px", 12f to "12px", 24f to "24px").forEach { (sizeVal, name) ->
-                                        Box(
-                                            modifier = Modifier
-                                                .background(
-                                                    if (drawStrokeWidth == sizeVal) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else Color.Transparent,
-                                                    RoundedCornerShape(4.dp)
-                                                )
-                                                .border(
-                                                    1.dp,
-                                                    if (drawStrokeWidth == sizeVal) MaterialTheme.colorScheme.primary else Color.LightGray,
-                                                    RoundedCornerShape(4.dp)
-                                                )
-                                                .clickable {
-                                                    drawStrokeWidth = sizeVal
-                                                    val selId = selectedDrawingId
-                                                    if (selId != null) {
-                                                        val idx = currentDrawings.indexOfFirst { it.id == selId }
-                                                        if (idx != -1) {
-                                                            val updatedDraw = currentDrawings[idx].copy(strokeWidth = sizeVal)
-                                                            currentDrawings[idx] = updatedDraw
-                                                            viewModel.editActivePageDrawings(currentDrawings.toList())
+                                    Column {
+                                        Text("Text Annotator Active", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                        Text("Tap anywhere on the canvas sheet to insert text", fontSize = 10.sp, color = Color.Gray)
+                                    }
+
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        // Default text sizes
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                        ) {
+                                            IconButton(
+                                                onClick = { addWordFontSize = (addWordFontSize - 2f).coerceAtLeast(8f) },
+                                                modifier = Modifier.size(24.dp)
+                                            ) {
+                                                Icon(Icons.Default.Remove, "Decrease size", modifier = Modifier.size(14.dp))
+                                            }
+                                            Text("${addWordFontSize.toInt()}sp", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                            IconButton(
+                                                onClick = { addWordFontSize = (addWordFontSize + 2f).coerceIn(8f, 100f) },
+                                                modifier = Modifier.size(24.dp)
+                                            ) {
+                                                Icon(Icons.Default.Add, "Increase size", modifier = Modifier.size(14.dp))
+                                            }
+                                        }
+
+                                        val textPresets = listOf("#000000", "#EF4444", "#3B82F6", "#10B981")
+                                         IconButton(
+                                             onClick = { 
+                                                 precisePageNumberText = "${pages.indexOf(activePage) + 1}"
+                                                 showPreciseTextPlacementDialog = true 
+                                             },
+                                             modifier = Modifier
+                                                 .background(MaterialTheme.colorScheme.primaryContainer, CircleShape)
+                                                 .size(26.dp)
+                                         ) {
+                                             Icon(
+                                                 imageVector = Icons.Default.Place,
+                                                 contentDescription = "Precise Coordinates Placement",
+                                                 tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                 modifier = Modifier.size(14.dp)
+                                             )
+                                         }
+                                         Spacer(modifier = Modifier.width(4.dp))
+                                        textPresets.forEach { hex ->
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(20.dp)
+                                                    .background(Color(android.graphics.Color.parseColor(hex)), CircleShape)
+                                                    .border(
+                                                        width = if (addWordColorHex.lowercase() == hex.lowercase()) 2.dp else 1.dp,
+                                                        color = if (addWordColorHex.lowercase() == hex.lowercase()) MaterialTheme.colorScheme.onSurface else Color.LightGray,
+                                                        shape = CircleShape
+                                                    )
+                                                    .clickable { addWordColorHex = hex }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                            "signature" -> {
+                                Column(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text("Saved Signature Profiles", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                                        
+                                        Button(
+                                            onClick = { viewModel.navigateTo(Screen.Dashboard) },
+                                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+                                            shape = RoundedCornerShape(6.dp),
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                            modifier = Modifier.height(26.dp)
+                                        ) {
+                                            Icon(Icons.Default.Add, null, modifier = Modifier.size(12.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("Signature Studio", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+
+                                    if (state.signatures.isEmpty()) {
+                                        Text(
+                                            text = "No profiles found. Tap 'Signature Studio' to draw or import one.",
+                                            fontSize = 11.sp,
+                                            color = Color.Gray,
+                                            modifier = Modifier.padding(vertical = 4.dp)
+                                        )
+                                    } else {
+                                        LazyRow(
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            items(state.signatures) { sig ->
+                                                Box(
+                                                    modifier = Modifier
+                                                        .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f), RoundedCornerShape(8.dp))
+                                                        .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                                                        .clickable {
+                                                            // Instant placement in the visible center of the page
+                                                            val spawnX = (0.5f - (offsetX / (scale * pageMeasuredWidthPx.coerceAtLeast(1f)))).coerceIn(0.05f, 0.85f)
+                                                            val spawnY = (0.5f - (offsetY / (scale * pageMeasuredHeightPx.coerceAtLeast(1f)))).coerceIn(0.05f, 0.85f)
+                                                            
+                                                            var finalWidth = 110f
+                                                            var finalHeight = 55f
+                                                            if (sig.pathDataJson.startsWith("image:")) {
+                                                                try {
+                                                                    val path = sig.pathDataJson.removePrefix("image:")
+                                                                    val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                                                                    android.graphics.BitmapFactory.decodeFile(path, opts)
+                                                                    if (opts.outWidth > 0 && opts.outHeight > 0) {
+                                                                        finalWidth = 110f
+                                                                        finalHeight = finalWidth / (opts.outWidth.toFloat() / opts.outHeight.toFloat())
+                                                                    }
+                                                                } catch (e: Exception) {
+                                                                    e.printStackTrace()
+                                                                }
+                                                            }
+
+                                                            val overlay = SignatureOverlayDef(
+                                                                id = java.util.UUID.randomUUID().toString(),
+                                                                x = spawnX,
+                                                                y = spawnY,
+                                                                width = finalWidth,
+                                                                height = finalHeight,
+                                                                signatureProfileId = sig.id
+                                                            )
+                                                            viewModel.addSignatureOverlay(overlay)
+                                                            activeEditorTab = "view"
                                                         }
+                                                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                                                ) {
+                                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                                        Icon(Icons.Default.Gesture, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(12.dp))
+                                                        Spacer(modifier = Modifier.width(6.dp))
+                                                        Text(sig.alias, fontWeight = FontWeight.Bold, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface)
                                                     }
                                                 }
-                                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            "filters" -> {
+                                Column(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text("Enhance Scanned Document", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        listOf(
+                                            "original" to "Original",
+                                            "black_white" to "B&W Mono",
+                                            "grayscale" to "Grayscale",
+                                            "enhance" to "Enhance Doc"
+                                        ).forEach { (filterType, name) ->
+                                            val isSelected = activePage.filterType == filterType
+                                            FilterChip(
+                                                selected = isSelected,
+                                                onClick = { viewModel.editActivePageFilter(filterType) },
+                                                label = { Text(name, fontSize = 11.sp) },
+                                                leadingIcon = {
+                                                    Icon(
+                                                        imageVector = when (filterType) {
+                                                            "original" -> Icons.Default.Image
+                                                            "black_white" -> Icons.Default.Contrast
+                                                            "grayscale" -> Icons.Default.Lens
+                                                            else -> Icons.Default.AutoAwesome
+                                                        },
+                                                        contentDescription = null,
+                                                        modifier = Modifier.size(14.dp)
+                                                    )
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                            "organize" -> {
+                                Column(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text("Page Manager & Reorder", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                                        
+                                        Button(
+                                            onClick = { editorFilePickerLauncher.launch("*/*") },
+                                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                                            shape = RoundedCornerShape(6.dp),
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                            modifier = Modifier.height(26.dp)
                                         ) {
-                                            Text(name, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                            Icon(Icons.Default.AddCircle, null, modifier = Modifier.size(12.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("Append Page", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+
+                                    LazyRow(
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                                    ) {
+                                        itemsIndexed(pages) { index, page ->
+                                            val isActive = page.id == activePage.id
+                                            Column(
+                                                horizontalAlignment = Alignment.CenterHorizontally,
+                                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                                            ) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(width = 75.dp, height = 100.dp)
+                                                        .background(
+                                                            color = if (isActive) MaterialTheme.colorScheme.primaryContainer else Color.White,
+                                                            shape = RoundedCornerShape(6.dp)
+                                                        )
+                                                        .border(
+                                                            border = BorderStroke(
+                                                                width = if (isActive) 2.dp else 1.dp,
+                                                                color = if (isActive) MaterialTheme.colorScheme.primary else Color.LightGray.copy(alpha = 0.6f)
+                                                            ),
+                                                            shape = RoundedCornerShape(6.dp)
+                                                        )
+                                                        .clip(RoundedCornerShape(6.dp))
+                                                        .clickable { viewModel.setActivePageId(page.id) }
+                                                ) {
+                                                    if (page.backgroundScanPath != null && java.io.File(page.backgroundScanPath).exists()) {
+                                                        val bitmap = remember(page.id, page.backgroundScanPath) { AndroidBitmapLoader.load(page.backgroundScanPath) }
+                                                        if (bitmap != null) {
+                                                            Image(
+                                                                bitmap = bitmap.asImageBitmap(),
+                                                                contentDescription = null,
+                                                                modifier = Modifier.fillMaxSize(),
+                                                                contentScale = ContentScale.Crop
+                                                            )
+                                                        }
+                                                    } else {
+                                                        Column(
+                                                            modifier = Modifier
+                                                                .fillMaxSize()
+                                                                .padding(4.dp),
+                                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                                            verticalArrangement = Arrangement.Center
+                                                        ) {
+                                                            Icon(
+                                                                imageVector = Icons.Default.Book,
+                                                                contentDescription = null,
+                                                                tint = MaterialTheme.colorScheme.secondary.copy(alpha = 0.5f),
+                                                                modifier = Modifier.size(18.dp)
+                                                            )
+                                                            Spacer(modifier = Modifier.height(2.dp))
+                                                            Text(
+                                                                text = page.type.uppercase(),
+                                                                fontSize = 8.sp,
+                                                                fontWeight = FontWeight.SemiBold,
+                                                                color = Color.Gray
+                                                            )
+                                                        }
+                                                    }
+                                                    
+                                                    // Badge Page Index Number
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .align(Alignment.TopStart)
+                                                            .padding(4.dp)
+                                                            .background(
+                                                                color = if (isActive) MaterialTheme.colorScheme.primary else Color.Black.copy(alpha = 0.6f),
+                                                                shape = CircleShape
+                                                            )
+                                                            .size(16.dp),
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        Text(
+                                                            text = "${index + 1}",
+                                                            color = Color.White,
+                                                            fontSize = 8.sp,
+                                                            fontWeight = FontWeight.Bold
+                                                        )
+                                                    }
+                                                }
+
+                                                // Actions Row: Left, Right, Delete
+                                                Row(
+                                                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    IconButton(
+                                                        onClick = {
+                                                            if (index > 0) {
+                                                                val mutablePages = pages.toMutableList()
+                                                                val temp = mutablePages[index]
+                                                                mutablePages[index] = mutablePages[index - 1]
+                                                                mutablePages[index - 1] = temp
+                                                                viewModel.reorderActivePages(mutablePages)
+                                                            }
+                                                        },
+                                                        enabled = index > 0,
+                                                        modifier = Modifier.size(20.dp)
+                                                    ) {
+                                                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Move Left", modifier = Modifier.size(11.dp))
+                                                    }
+                                                    
+                                                    IconButton(
+                                                        onClick = {
+                                                            viewModel.removePageFromActiveDocument(page.id)
+                                                        },
+                                                        modifier = Modifier.size(20.dp)
+                                                    ) {
+                                                        Icon(Icons.Default.Delete, "Remove Page", tint = Color.Red.copy(alpha = 0.8f), modifier = Modifier.size(11.dp))
+                                                    }
+                                                    
+                                                    IconButton(
+                                                        onClick = {
+                                                            if (index < pages.size - 1) {
+                                                                val mutablePages = pages.toMutableList()
+                                                                val temp = mutablePages[index]
+                                                                mutablePages[index] = mutablePages[index + 1]
+                                                                mutablePages[index + 1] = temp
+                                                                viewModel.reorderActivePages(mutablePages)
+                                                            }
+                                                        },
+                                                        enabled = index < pages.size - 1,
+                                                        modifier = Modifier.size(20.dp)
+                                                    ) {
+                                                        Icon(Icons.Default.ArrowForward, "Move Right", modifier = Modifier.size(11.dp))
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -3299,136 +4817,59 @@ fun EditorScreen(
                         }
                     }
                 }
-                // Interactive annotations toolbar
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .windowInsetsPadding(WindowInsets.navigationBars),
-                    tonalElevation = 8.dp
+
+                // 2. MAIN NAVIGATION TAB BAR
+                BottomAppBar(
+                    modifier = Modifier.windowInsetsPadding(WindowInsets.navigationBars),
+                    tonalElevation = 8.dp,
+                    containerColor = MaterialTheme.colorScheme.surface
                 ) {
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(12.dp),
+                        modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceAround,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        IconButton(
-                            onClick = { annotationMode = "none"; isAddingTextMode = false; selectedDrawingId = null },
-                            colors = IconButtonDefaults.iconButtonColors(
-                                containerColor = if (annotationMode == "none" && !isAddingTextMode) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else Color.Transparent
-                            )
-                        ) {
-                            Icon(Icons.Default.TouchApp, "Gesture Scroll", tint = if (annotationMode == "none" && !isAddingTextMode) MaterialTheme.colorScheme.primary else Color.Gray)
-                        }
-
-
-
-                        // Text Marker markup
-                        IconButton(
-                            onClick = { isAddingTextMode = true; annotationMode = "none"; selectedDrawingId = null },
-                            colors = IconButtonDefaults.iconButtonColors(
-                                containerColor = if (isAddingTextMode) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else Color.Transparent
-                            )
-                        ) {
-                            Icon(Icons.Default.TextFields, "Add Text Layer", tint = if (isAddingTextMode) MaterialTheme.colorScheme.primary else Color.Gray)
-                        }
-
-                        // Drawing and shapes trigger button
-                        IconButton(
-                            onClick = { annotationMode = "draw"; isAddingTextMode = false; selectedDrawingId = null },
-                            colors = IconButtonDefaults.iconButtonColors(
-                                containerColor = if (annotationMode == "draw") MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else Color.Transparent
-                            )
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Gesture,
-                                contentDescription = "Draw & Annotate Shapes",
-                                tint = if (annotationMode == "draw") MaterialTheme.colorScheme.primary else Color.Gray
-                            )
-                        }
-
-                        // Overlay vector signatures and place them anywhere!
-                        IconButton(
-                            onClick = { showSignatureSelectionDrawer = true; selectedDrawingId = null },
-                            colors = IconButtonDefaults.iconButtonColors(
-                                containerColor = if (annotationMode == "signature_overlay") MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else Color.Transparent
-                            )
-                        ) {
-                            Icon(Icons.Default.Draw, "Insert Signature Profile", tint = MaterialTheme.colorScheme.primary)
-                        }
-
-                        // Page filter function menu
-                        Box {
-                            IconButton(
-                                onClick = { showFilterDropdown = true }
-                            ) {
-                                Icon(
-                                    Icons.Default.FilterAlt,
-                                    "Apply Image Filter",
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
-                            }
+                        listOf(
+                            "view" to ("Preview" to Icons.Default.Visibility),
+                            "annotate" to ("Draw" to Icons.Default.Gesture),
+                            "text" to ("Text" to Icons.Default.TextFields),
+                            "signature" to ("Sign" to Icons.Default.Draw),
+                            "filters" to ("Filters" to Icons.Default.FilterAlt),
+                            "organize" to ("Pages" to Icons.Default.ViewAgenda)
+                        ).forEach { (tabId, pair) ->
+                            val (label, icon) = pair
+                            val isSelected = activeEditorTab == tabId
                             
-                            DropdownMenu(
-                                expanded = showFilterDropdown,
-                                onDismissRequest = { showFilterDropdown = false }
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable { activeEditorTab = tabId }
+                                    .padding(vertical = 4.dp)
                             ) {
-                                DropdownMenuItem(
-                                    text = { Text("Original") },
-                                    onClick = {
-                                        viewModel.editActivePageFilter("original")
-                                        showFilterDropdown = false
-                                    },
-                                    leadingIcon = {
-                                        Icon(
-                                            Icons.Default.Image,
-                                            contentDescription = null,
-                                            tint = if (activePage.filterType == "original") MaterialTheme.colorScheme.primary else Color.Gray
+                                Box(
+                                    modifier = Modifier
+                                        .background(
+                                            if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else Color.Transparent,
+                                            RoundedCornerShape(12.dp)
                                         )
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Black & White") },
-                                    onClick = {
-                                        viewModel.editActivePageFilter("black_white")
-                                        showFilterDropdown = false
-                                    },
-                                    leadingIcon = {
-                                        Icon(
-                                            Icons.Default.Contrast,
-                                            contentDescription = null,
-                                            tint = if (activePage.filterType == "black_white") MaterialTheme.colorScheme.primary else Color.Gray
-                                        )
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Grayscale") },
-                                    onClick = {
-                                        viewModel.editActivePageFilter("grayscale")
-                                        showFilterDropdown = false
-                                    },
-                                    leadingIcon = {
-                                        Icon(
-                                            Icons.Default.Lens,
-                                            contentDescription = null,
-                                            tint = if (activePage.filterType == "grayscale") MaterialTheme.colorScheme.primary else Color.Gray
-                                        )
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Enhance Docs") },
-                                    onClick = {
-                                        viewModel.editActivePageFilter("enhance")
-                                        showFilterDropdown = false
-                                    },
-                                    leadingIcon = {
-                                        Icon(
-                                            Icons.Default.AutoAwesome,
-                                            contentDescription = null,
-                                            tint = if (activePage.filterType == "enhance") MaterialTheme.colorScheme.primary else Color.Gray
-                                        )
-                                    }
+                                        .padding(horizontal = 14.dp, vertical = 4.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = icon,
+                                        contentDescription = label,
+                                        tint = if (isSelected) MaterialTheme.colorScheme.primary else Color.Gray,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = label,
+                                    fontSize = 10.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Gray
                                 )
                             }
                         }
@@ -3437,11 +4878,41 @@ fun EditorScreen(
             }
         }
     ) { padding ->
+        // Sync active state variables based on selected tab mode
+        LaunchedEffect(activeEditorTab) {
+            when (activeEditorTab) {
+                "view" -> {
+                    annotationMode = "none"
+                    isAddingTextMode = false
+                }
+                "annotate" -> {
+                    annotationMode = "draw"
+                    isAddingTextMode = false
+                }
+                "text" -> {
+                    annotationMode = "none"
+                    isAddingTextMode = true
+                }
+                "signature" -> {
+                    annotationMode = "signature_overlay"
+                    isAddingTextMode = false
+                }
+                "filters" -> {
+                    annotationMode = "none"
+                    isAddingTextMode = false
+                }
+                "organize" -> {
+                    annotationMode = "none"
+                    isAddingTextMode = false
+                }
+            }
+        }
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .background(Color(0xFFE2E8F0)) // high contrast cardboard desk workspace
+                .background(Color(0xFF0F172A)) // Premium deep charcoal canvas desk workspace
         ) {
             // ---------------- PAGE WORKBENCH PANEL ----------------
             if (showPageWorkbench) {
@@ -3524,7 +4995,7 @@ fun EditorScreen(
                                             .clickable { viewModel.setActivePageId(page.id) }
                                     ) {
                                         if (page.backgroundScanPath != null && File(page.backgroundScanPath).exists()) {
-                                            val bitmap = remember(page.id) { AndroidBitmapLoader.load(page.backgroundScanPath) }
+                                            val bitmap = remember(page.id, page.backgroundScanPath) { AndroidBitmapLoader.load(page.backgroundScanPath) }
                                             if (bitmap != null) {
                                                 Image(
                                                     bitmap = bitmap.asImageBitmap(),
@@ -3650,117 +5121,15 @@ fun EditorScreen(
                 }
             }
 
-            // Page navigation top bar (Page picker)
-            if (showPageEditorControls) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(8.dp)
-                        .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(8.dp))
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(
-                        onClick = {
-                            val activeIdx = pages.indexOf(activePage)
-                            if (activeIdx > 0) {
-                                val prev = pages[activeIdx - 1]
-                                viewModel.setActivePageId(prev.id)
-                            }
-                        },
-                        enabled = pages.indexOf(activePage) > 0
-                    ) {
-                        Icon(Icons.Default.ChevronLeft, "Previous page")
-                    }
-
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Text(
-                            text = "Page ${pages.indexOf(activePage) + 1}/${pages.size}",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(end = 4.dp)
-                        )
-                        
-                        // Add Page
-                        IconButton(onClick = { editorFilePickerLauncher.launch("*/*") }, modifier = Modifier.size(36.dp)) {
-                            Icon(Icons.Default.AddCircle, "Add page", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-                        }
-                        
-                        // Delete Page
-                        IconButton(onClick = { showDeletePageConfirm = true }, modifier = Modifier.size(36.dp)) {
-                            Icon(Icons.Default.DeleteForever, "Remove Page", tint = Color.Red, modifier = Modifier.size(20.dp))
-                        }
-                        
-                        // Page Rotation clockwise
-                        IconButton(
-                            onClick = {
-                                val newRotation = (pageRotationDegrees + 90) % 360
-                                pageRotationDegrees = newRotation
-                                viewModel.editActivePageRotation(newRotation)
-                            },
-                            modifier = Modifier.size(36.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.CropRotate,
-                                contentDescription = "Rotate 90° Clockwise",
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-
-                        // Zoom In
-                        IconButton(
-                            onClick = { scale = (scale + 0.25f).coerceIn(1f, 5f) },
-                            modifier = Modifier.size(36.dp)
-                        ) {
-                            Icon(Icons.Default.ZoomIn, "Zoom In", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-                        }
-
-                        // Zoom Out
-                        IconButton(
-                            onClick = { scale = (scale - 0.25f).coerceIn(1f, 5f) },
-                            modifier = Modifier.size(36.dp)
-                        ) {
-                            Icon(Icons.Default.ZoomOut, "Zoom Out", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-                        }
-
-                        // Reset Viewport
-                        IconButton(
-                            onClick = { scale = 1f; offsetX = 0f; offsetY = 0f; pageRotationDegrees = 0; isHorizontalOverride = null },
-                            modifier = Modifier.size(36.dp)
-                        ) {
-                            Icon(Icons.Default.CenterFocusStrong, "Reset View", tint = Color.Gray, modifier = Modifier.size(18.dp))
-                        }
-                    }
-
-                    IconButton(
-                        onClick = {
-                            val activeIdx = pages.indexOf(activePage)
-                            if (activeIdx < pages.size - 1) {
-                                val next = pages[activeIdx + 1]
-                                viewModel.setActivePageId(next.id)
-                            }
-                        },
-                        enabled = pages.indexOf(activePage) < pages.size - 1
-                    ) {
-                        Icon(Icons.Default.ChevronRight, "Next page")
-                    }
-                }
-            }
-
             // Central Document Page A4 Canvas sheet
             BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
                     .padding(16.dp)
-                    .background(Color(0xFFE2E8F0), RoundedCornerShape(4.dp))
-                    .border(BorderStroke(1.dp, Color.LightGray), RoundedCornerShape(4.dp))
-                    .clip(RoundedCornerShape(4.dp))
+                    .background(Color(0xFF0F172A), RoundedCornerShape(8.dp))
+                    .border(BorderStroke(1.dp, Color.DarkGray), RoundedCornerShape(8.dp))
+                    .clip(RoundedCornerShape(8.dp))
                     .pointerInput(activePage.id, annotationMode, isAddingTextMode, activeDraggingId) {
                         if (annotationMode != "draw" && activeDraggingId == null) {
                             detectTapGestures(
@@ -3776,13 +5145,60 @@ fun EditorScreen(
                         if (annotationMode != "draw" && activeDraggingId == null) {
                             detectTransformGestures { centroid, pan, zoom, rotation ->
                                 scale = (scale * zoom).coerceIn(0.5f, 5f)
-                                offsetX += pan.x
-                                offsetY += pan.y
+                                if (scale > 1f) {
+                                    offsetX += pan.x
+                                    offsetY += pan.y
+                                } else {
+                                    offsetX = 0f
+                                    offsetY = 0f
+                                }
                             }
                         }
                     }
             ) {
-                val pageRatio = remember(activePage.id, isLandscape) {
+                if (isContinuousScrollMode) {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(24.dp),
+                        contentPadding = PaddingValues(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        itemsIndexed(pages) { index, page ->
+                            val isCurrent = page.id == activePage.id
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier
+                                    .clickable { viewModel.setActivePageId(page.id) }
+                                    .widthIn(max = 450.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .border(
+                                            width = if (isCurrent) 2.dp else 1.dp,
+                                            color = if (isCurrent) MaterialTheme.colorScheme.primary else Color.Gray.copy(alpha = 0.5f),
+                                            shape = RoundedCornerShape(6.dp)
+                                        )
+                                        .padding(4.dp)
+                                ) {
+                                    StaticPagePreview(
+                                        page = page,
+                                        state = state,
+                                        viewModel = viewModel,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = "Page ${index + 1} of ${pages.size}",
+                                    color = Color.White.copy(alpha = 0.8f),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    val pageRatio = remember(activePage.id, isLandscape, activePage.backgroundScanPath) {
                     if (activePage.backgroundScanPath != null) {
                         val file = java.io.File(activePage.backgroundScanPath)
                         if (file.exists()) {
@@ -3816,7 +5232,15 @@ fun EditorScreen(
                         .background(Color.White)
                         .shadow(4.dp, RoundedCornerShape(2.dp))
                 ) {
-                    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                    BoxWithConstraints(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .onGloballyPositioned { coordinates ->
+                                val pos = coordinates.positionOnScreen()
+                                pagePositionOnScreenX = pos.x
+                                pagePositionOnScreenY = pos.y
+                            }
+                    ) {
                         val density = LocalDensity.current
                         val widthDp = maxWidth
                         val heightDp = maxHeight
@@ -3832,7 +5256,7 @@ fun EditorScreen(
                     if (activePage.backgroundScanPath != null) {
                         val file = File(activePage.backgroundScanPath)
                         if (file.exists()) {
-                            val bitmap = remember(activePage.id, activePage.filterType) {
+                            val bitmap = remember(activePage.id, activePage.filterType, activePage.backgroundScanPath) {
                                 val base = AndroidBitmapLoader.load(file.absolutePath)
                                 if (base != null && activePage.filterType != "original") {
                                     val filtered = viewModel.applyFilterToBitmap(base, activePage.filterType)
@@ -3862,21 +5286,43 @@ fun EditorScreen(
                             .pointerInput(activePage.id, annotationMode, isAddingTextMode, drawShapeType) {
                                 if (annotationMode == "draw") {
                                     if (drawShapeType == "select") {
-                                        detectTapGestures { offset ->
-                                            val rx = offset.x / size.width
-                                            val ry = offset.y / size.height
-                                            var found: DrawingDef? = null
-                                            for (drawing in currentDrawings.asReversed()) {
-                                                if (isTapNearDrawing(rx, ry, drawing)) {
-                                                    found = drawing
-                                                    break
+                                        var dragTargetId: String? = null
+                                        detectDragGestures(
+                                            onDragStart = { offset ->
+                                                val rx = offset.x / size.width
+                                                val ry = offset.y / size.height
+                                                var found: DrawingDef? = null
+                                                for (drawing in currentDrawings.asReversed()) {
+                                                    if (isTapNearDrawing(rx, ry, drawing)) {
+                                                        found = drawing
+                                                        break
+                                                    }
+                                                }
+                                                selectedDrawingId = found?.id
+                                                dragTargetId = found?.id
+                                            },
+                                            onDragEnd = {
+                                                dragTargetId = null
+                                                viewModel.editActivePageDrawings(currentDrawings.toList())
+                                            },
+                                            onDragCancel = {
+                                                dragTargetId = null
+                                            },
+                                            onDrag = { change, dragAmount ->
+                                                val selId = dragTargetId
+                                                if (selId != null) {
+                                                    change.consume()
+                                                    val deltaX = dragAmount.x / size.width
+                                                    val deltaY = dragAmount.y / size.height
+                                                    val idx = currentDrawings.indexOfFirst { it.id == selId }
+                                                    if (idx != -1) {
+                                                        val target = currentDrawings[idx]
+                                                        val movedPoints = target.points.map { PointDef(it.x + deltaX, it.y + deltaY) }
+                                                        currentDrawings[idx] = target.copy(points = movedPoints)
+                                                    }
                                                 }
                                             }
-                                            selectedDrawingId = found?.id
-                                            if (found != null) {
-                                                viewModel.triggerFeedback("Shape selected! Use the color palette, size controls, or delete button.")
-                                            }
-                                        }
+                                        )
                                     } else {
                                         detectDragGestures(
                                             onDragStart = { offset ->
@@ -3926,6 +5372,10 @@ fun EditorScreen(
                                         addWordY = ry
                                         addWordTextDraft = ""
                                         showAddWordDialog = true
+                                    }
+                                } else {
+                                    detectTapGestures {
+                                        selectedAnnotationId = null
                                     }
                                 }
                             }
@@ -3988,6 +5438,29 @@ fun EditorScreen(
                                     topLeft = Offset(left, top),
                                     size = androidx.compose.ui.geometry.Size(right - left, bottom - top),
                                     style = pathStyle
+                                )
+                            }
+                            "redact" -> {
+                                val start = draw.points.first()
+                                val end = draw.points.last()
+                                val left = minOf(start.x, end.x) * size.width
+                                val top = minOf(start.y, end.y) * size.height
+                                val right = maxOf(start.x, end.x) * size.width
+                                val bottom = maxOf(start.y, end.y) * size.height
+                                drawRect(
+                                    color = Color.Black,
+                                    topLeft = Offset(left, top),
+                                    size = androidx.compose.ui.geometry.Size(right - left, bottom - top),
+                                    style = androidx.compose.ui.graphics.drawscope.Fill
+                                )
+                                drawRect(
+                                    color = Color(0xFFEF4444),
+                                    topLeft = Offset(left, top),
+                                    size = androidx.compose.ui.geometry.Size(right - left, bottom - top),
+                                    style = Stroke(
+                                        width = 1.5f * (size.width / 400f),
+                                        pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(10f, 10f), 0f)
+                                    )
                                 )
                             }
                             "circle" -> {
@@ -4055,68 +5528,330 @@ fun EditorScreen(
                 }
 
                 if (activePage.type.lowercase() == "word") {
-                    var wordTextValue by remember(activePage.id) {
-                        val existing = currentTextAnns.firstOrNull { it.id == "word_main_content" }
-                        mutableStateOf(existing?.text ?: "")
-                    }
+                    val wordAnn = activePage.textAnnotations.firstOrNull { it.id == "word_main_content" }
                     
-                    Box(
+                    var wordTextValue by remember(activePage.id) {
+                        mutableStateOf(wordAnn?.text ?: "")
+                    }
+                    var wordFontSize by remember(activePage.id) { mutableStateOf(wordAnn?.fontSize ?: 14f) }
+                    var wordColorHex by remember(activePage.id) { mutableStateOf(wordAnn?.colorHex ?: "#1E293B") }
+                    var wordIsBold by remember(activePage.id) { mutableStateOf(wordAnn?.isBold ?: false) }
+                    var wordIsItalic by remember(activePage.id) { mutableStateOf(wordAnn?.isItalic ?: false) }
+                    var wordAlignment by remember(activePage.id) { mutableStateOf(wordAnn?.alignment ?: "left") }
+                    var wordFontName by remember(activePage.id) { mutableStateOf(wordAnn?.fontName ?: "sans-serif") }
+                    var wordHasUnderline by remember(activePage.id) { mutableStateOf(wordAnn?.hasUnderline ?: false) }
+                    var wordHasStrikeThrough by remember(activePage.id) { mutableStateOf(wordAnn?.hasStrikeThrough ?: false) }
+
+                    val updateWordAnn = { newText: String, size: Float, color: String, bold: Boolean, italic: Boolean, align: String, font: String, underline: Boolean, strike: Boolean ->
+                        val updatedList = currentTextAnns.toMutableList()
+                        val idx = updatedList.indexOfFirst { it.id == "word_main_content" }
+                        val updatedAnn = com.example.data.TextAnnotationDef(
+                            id = "word_main_content",
+                            text = newText,
+                            x = 0.08f,
+                            y = 0.08f,
+                            fontSize = size,
+                            colorHex = color,
+                            fontName = font,
+                            isBold = bold,
+                            isItalic = italic,
+                            alignment = align,
+                            hasUnderline = underline,
+                            hasStrikeThrough = strike
+                        )
+                        if (idx != -1) {
+                            updatedList[idx] = updatedAnn
+                        } else {
+                            updatedList.add(updatedAnn)
+                        }
+                        
+                        val idxLocal = currentTextAnns.indexOfFirst { it.id == "word_main_content" }
+                        if (idxLocal != -1) {
+                            currentTextAnns[idxLocal] = updatedAnn
+                        } else {
+                            currentTextAnns.add(updatedAnn)
+                        }
+                        viewModel.editActivePageAnnotations(updatedList)
+                    }
+
+                    Column(
                         modifier = Modifier
                             .fillMaxSize()
                             .background(Color.White)
-                            .padding(horizontal = 24.dp, vertical = 24.dp)
                     ) {
-                        androidx.compose.foundation.text.BasicTextField(
-                            value = wordTextValue,
-                            onValueChange = { newText ->
-                                wordTextValue = newText
-                                val updatedList = currentTextAnns.toMutableList()
-                                val idx = updatedList.indexOfFirst { it.id == "word_main_content" }
-                                val updatedAnn = com.example.data.TextAnnotationDef(
-                                    id = "word_main_content",
-                                    text = newText,
-                                    x = 0.08f,
-                                    y = 0.08f,
-                                    fontSize = 14f,
-                                    colorHex = "#1E293B",
-                                    isBold = false,
-                                    alignment = "left"
-                                )
-                                if (idx != -1) {
-                                    updatedList[idx] = updatedAnn
-                                } else {
-                                    updatedList.add(updatedAnn)
-                                }
-                                
-                                val idxLocal = currentTextAnns.indexOfFirst { it.id == "word_main_content" }
-                                if (idxLocal != -1) {
-                                    currentTextAnns[idxLocal] = updatedAnn
-                                } else {
-                                    currentTextAnns.add(updatedAnn)
-                                }
-                                
-                                viewModel.editActivePageAnnotations(updatedList)
-                            },
-                            textStyle = androidx.compose.ui.text.TextStyle(
-                                fontSize = 14.sp,
-                                color = Color(0xFF1E293B),
-                                fontFamily = androidx.compose.ui.text.font.FontFamily.Default,
-                                lineHeight = 22.sp
-                            ),
-                            modifier = Modifier.fillMaxSize(),
-                            decorationBox = { innerTextField ->
-                                Box(modifier = Modifier.fillMaxSize()) {
-                                    if (wordTextValue.isEmpty()) {
-                                        Text(
-                                            text = "Type here...",
-                                            color = Color.LightGray,
-                                            fontSize = 14.sp
-                                        )
+                        // 1. STYLE TOOLBAR
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color(0xFFF1F5F9))
+                                .horizontalScroll(rememberScrollState())
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Font Family
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .background(Color.White, RoundedCornerShape(4.dp))
+                                    .padding(horizontal = 4.dp, vertical = 2.dp)
+                            ) {
+                                listOf("sans-serif" to "Aa", "serif" to "Serif", "monospace" to "Mono").forEach { (fName, label) ->
+                                    val isSel = wordFontName.lowercase() == fName
+                                    TextButton(
+                                        onClick = {
+                                            wordFontName = fName
+                                            updateWordAnn(wordTextValue, wordFontSize, wordColorHex, wordIsBold, wordIsItalic, wordAlignment, wordFontName, wordHasUnderline, wordHasStrikeThrough)
+                                        },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                        colors = ButtonDefaults.textButtonColors(
+                                            containerColor = if (isSel) Color(0xFFE2E8F0) else Color.Transparent,
+                                            contentColor = if (isSel) Color(0xFF0F172A) else Color(0xFF64748B)
+                                        ),
+                                        modifier = Modifier.defaultMinSize(minWidth = 32.dp, minHeight = 24.dp)
+                                    ) {
+                                        Text(label, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                                     }
-                                    innerTextField()
                                 }
                             }
+
+                            // Font size controls
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .background(Color.White, RoundedCornerShape(4.dp))
+                                    .padding(horizontal = 4.dp, vertical = 2.dp)
+                            ) {
+                                IconButton(
+                                    onClick = {
+                                        if (wordFontSize > 10f) {
+                                            wordFontSize -= 2f
+                                            updateWordAnn(wordTextValue, wordFontSize, wordColorHex, wordIsBold, wordIsItalic, wordAlignment, wordFontName, wordHasUnderline, wordHasStrikeThrough)
+                                        }
+                                    },
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(Icons.Default.Remove, contentDescription = "Decrease size", tint = Color(0xFF475569), modifier = Modifier.size(14.dp))
+                                }
+                                Text(
+                                    text = "${wordFontSize.toInt()} pt",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF1E293B),
+                                    modifier = Modifier.padding(horizontal = 6.dp)
+                                )
+                                IconButton(
+                                    onClick = {
+                                        if (wordFontSize < 72f) {
+                                            wordFontSize += 2f
+                                            updateWordAnn(wordTextValue, wordFontSize, wordColorHex, wordIsBold, wordIsItalic, wordAlignment, wordFontName, wordHasUnderline, wordHasStrikeThrough)
+                                        }
+                                    },
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(Icons.Default.Add, contentDescription = "Increase size", tint = Color(0xFF475569), modifier = Modifier.size(14.dp))
+                                }
+                            }
+
+                            // Bold, Italic, Underline, StrikeThrough formatting buttons
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .background(Color.White, RoundedCornerShape(4.dp))
+                                    .padding(horizontal = 4.dp, vertical = 2.dp)
+                            ) {
+                                // Bold
+                                TextButton(
+                                    onClick = {
+                                        wordIsBold = !wordIsBold
+                                        updateWordAnn(wordTextValue, wordFontSize, wordColorHex, wordIsBold, wordIsItalic, wordAlignment, wordFontName, wordHasUnderline, wordHasStrikeThrough)
+                                    },
+                                    colors = ButtonDefaults.textButtonColors(
+                                        containerColor = if (wordIsBold) Color(0xFFD9F1FF) else Color.Transparent,
+                                        contentColor = if (wordIsBold) Color(0xFF0284C7) else Color(0xFF475569)
+                                    ),
+                                    contentPadding = PaddingValues(0.dp),
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Text("B", fontWeight = FontWeight.ExtraBold, fontSize = 12.sp)
+                                }
+
+                                // Italic
+                                TextButton(
+                                    onClick = {
+                                        wordIsItalic = !wordIsItalic
+                                        updateWordAnn(wordTextValue, wordFontSize, wordColorHex, wordIsBold, wordIsItalic, wordAlignment, wordFontName, wordHasUnderline, wordHasStrikeThrough)
+                                    },
+                                    colors = ButtonDefaults.textButtonColors(
+                                        containerColor = if (wordIsItalic) Color(0xFFD9F1FF) else Color.Transparent,
+                                        contentColor = if (wordIsItalic) Color(0xFF0284C7) else Color(0xFF475569)
+                                    ),
+                                    contentPadding = PaddingValues(0.dp),
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Text("I", style = androidx.compose.ui.text.TextStyle(fontStyle = androidx.compose.ui.text.font.FontStyle.Italic), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+
+                                // Underline
+                                TextButton(
+                                    onClick = {
+                                        wordHasUnderline = !wordHasUnderline
+                                        updateWordAnn(wordTextValue, wordFontSize, wordColorHex, wordIsBold, wordIsItalic, wordAlignment, wordFontName, wordHasUnderline, wordHasStrikeThrough)
+                                    },
+                                    colors = ButtonDefaults.textButtonColors(
+                                        containerColor = if (wordHasUnderline) Color(0xFFD9F1FF) else Color.Transparent,
+                                        contentColor = if (wordHasUnderline) Color(0xFF0284C7) else Color(0xFF475569)
+                                    ),
+                                    contentPadding = PaddingValues(0.dp),
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Text("U", style = androidx.compose.ui.text.TextStyle(textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+
+                                // StrikeThrough
+                                TextButton(
+                                    onClick = {
+                                        wordHasStrikeThrough = !wordHasStrikeThrough
+                                        updateWordAnn(wordTextValue, wordFontSize, wordColorHex, wordIsBold, wordIsItalic, wordAlignment, wordFontName, wordHasUnderline, wordHasStrikeThrough)
+                                    },
+                                    colors = ButtonDefaults.textButtonColors(
+                                        containerColor = if (wordHasStrikeThrough) Color(0xFFD9F1FF) else Color.Transparent,
+                                        contentColor = if (wordHasStrikeThrough) Color(0xFF0284C7) else Color(0xFF475569)
+                                    ),
+                                    contentPadding = PaddingValues(0.dp),
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Text("S", style = androidx.compose.ui.text.TextStyle(textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+
+                            // Alignments
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .background(Color.White, RoundedCornerShape(4.dp))
+                                    .padding(horizontal = 4.dp, vertical = 2.dp)
+                            ) {
+                                listOf("left" to Icons.Default.FormatAlignLeft, "center" to Icons.Default.FormatAlignCenter, "right" to Icons.Default.FormatAlignRight).forEach { (alignVal, icon) ->
+                                    val isSel = wordAlignment.lowercase() == alignVal
+                                    IconButton(
+                                        onClick = {
+                                            wordAlignment = alignVal
+                                            updateWordAnn(wordTextValue, wordFontSize, wordColorHex, wordIsBold, wordIsItalic, wordAlignment, wordFontName, wordHasUnderline, wordHasStrikeThrough)
+                                        },
+                                        modifier = Modifier.size(24.dp),
+                                        colors = IconButtonDefaults.iconButtonColors(
+                                            containerColor = if (isSel) Color(0xFFE2E8F0) else Color.Transparent
+                                        )
+                                    ) {
+                                        Icon(icon, contentDescription = "$alignVal align", modifier = Modifier.size(13.dp), tint = if (isSel) Color(0xFF0F172A) else Color(0xFF64748B))
+                                    }
+                                }
+                            }
+                        }
+
+                        // 1b. Color Picker Swatches Row
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color(0xFFF8FAFC))
+                                .horizontalScroll(rememberScrollState())
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Font Color:", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF64748B))
+                            listOf(
+                                "#1E293B", "#000000", "#2563EB", "#10B981", "#EF4444", "#8B5CF6", "#F59E0B", "#475569"
+                            ).forEach { hex ->
+                                val swatchColor = Color(android.graphics.Color.parseColor(hex))
+                                val isSel = wordColorHex.uppercase() == hex.uppercase()
+                                Box(
+                                    modifier = Modifier
+                                        .size(18.dp)
+                                        .clip(RoundedCornerShape(50))
+                                        .background(swatchColor)
+                                        .clickable {
+                                            wordColorHex = hex
+                                            updateWordAnn(wordTextValue, wordFontSize, wordColorHex, wordIsBold, wordIsItalic, wordAlignment, wordFontName, wordHasUnderline, wordHasStrikeThrough)
+                                        }
+                                        .border(
+                                            width = if (isSel) 2.dp else 0.dp,
+                                            color = if (isSel) Color(0xFF0F172A) else Color.Transparent,
+                                            shape = RoundedCornerShape(50)
+                                        )
+                                )
+                            }
+                        }
+
+                        // Separator line
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(1.dp)
+                                .background(Color(0xFFE2E8F0))
                         )
+
+                        // 2. TEXT WORKSPACE WINDOW
+                        val pFontFamily = when (wordFontName.lowercase()) {
+                            "serif" -> androidx.compose.ui.text.font.FontFamily.Serif
+                            "monospace" -> androidx.compose.ui.text.font.FontFamily.Monospace
+                            else -> androidx.compose.ui.text.font.FontFamily.Default
+                        }
+                        val pTextDecoration = when {
+                            wordHasUnderline && wordHasStrikeThrough -> androidx.compose.ui.text.style.TextDecoration.Underline + androidx.compose.ui.text.style.TextDecoration.LineThrough
+                            wordHasUnderline -> androidx.compose.ui.text.style.TextDecoration.Underline
+                            wordHasStrikeThrough -> androidx.compose.ui.text.style.TextDecoration.LineThrough
+                            else -> androidx.compose.ui.text.style.TextDecoration.None
+                        }
+                        val pFontWeight = if (wordIsBold) FontWeight.Bold else FontWeight.Normal
+                        val pFontStyle = if (wordIsItalic) androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal
+                        val pTextAlign = when (wordAlignment.lowercase()) {
+                            "center" -> androidx.compose.ui.text.style.TextAlign.Center
+                            "right" -> androidx.compose.ui.text.style.TextAlign.Right
+                            else -> androidx.compose.ui.text.style.TextAlign.Left
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.White)
+                                .padding(horizontal = 24.dp, vertical = 18.dp)
+                        ) {
+                            androidx.compose.foundation.text.BasicTextField(
+                                value = wordTextValue,
+                                onValueChange = { newText ->
+                                    wordTextValue = newText
+                                    updateWordAnn(newText, wordFontSize, wordColorHex, wordIsBold, wordIsItalic, wordAlignment, wordFontName, wordHasUnderline, wordHasStrikeThrough)
+                                },
+                                textStyle = androidx.compose.ui.text.TextStyle(
+                                    fontSize = wordFontSize.sp,
+                                    color = Color(android.graphics.Color.parseColor(wordColorHex)),
+                                    fontFamily = pFontFamily,
+                                    fontWeight = pFontWeight,
+                                    fontStyle = pFontStyle,
+                                    textDecoration = pTextDecoration,
+                                    textAlign = pTextAlign,
+                                    lineHeight = (wordFontSize * 1.5f).sp
+                                ),
+                                modifier = Modifier.fillMaxSize(),
+                                decorationBox = { innerTextField ->
+                                    Box(modifier = Modifier.fillMaxSize()) {
+                                        if (wordTextValue.isEmpty()) {
+                                            Text(
+                                                text = "Type here...",
+                                                color = Color.LightGray,
+                                                fontSize = wordFontSize.sp,
+                                                fontFamily = pFontFamily,
+                                                textAlign = pTextAlign,
+                                                modifier = Modifier.fillMaxWidth()
+                                            )
+                                        }
+                                        innerTextField()
+                                    }
+                                }
+                            )
+                        }
                     }
                 }
 
@@ -4126,430 +5861,187 @@ fun EditorScreen(
                     currentTextAnns
                 }
 
-                // Render text annotation overlays as draggable UI elements with exact coordinates!
-                textAnnsToRender.forEachIndexed { idx, txtAnn ->
-                    var itemOffsetX by remember(txtAnn.id) { mutableFloatStateOf(0f) }
-                    var itemOffsetY by remember(txtAnn.id) { mutableFloatStateOf(0f) }
-                    var fontSizeDelta by remember(txtAnn.id) { mutableFloatStateOf(0f) }
-
-                    val isBgTransparent = txtAnn.bgColorHex.lowercase() == "transparent" || txtAnn.bgColorHex.isBlank()
-                    val backgroundParsedColor = if (isBgTransparent) {
-                        Color.Transparent
-                    } else {
-                        try {
-                            Color(android.graphics.Color.parseColor(txtAnn.bgColorHex))
-                        } catch (e: Exception) {
-                            Color.Transparent
-                        }
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .offset(
-                                x = widthDp * txtAnn.x,
-                                y = heightDp * txtAnn.y
+                // Custom FrameLayout container managing Dynamic Resizable & Draggable Text Annotation Views over the PDF renderer
+                AndroidView(
+                    factory = { ctx ->
+                        android.widget.FrameLayout(ctx).apply {
+                            layoutParams = android.widget.FrameLayout.LayoutParams(
+                                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                                android.widget.FrameLayout.LayoutParams.MATCH_PARENT
                             )
-                            .offset { IntOffset(itemOffsetX.roundToInt(), itemOffsetY.roundToInt()) }
-                            .zIndex(if (activeDraggingId == txtAnn.id) 100f else 2f)
-                            .pointerInput(txtAnn.id) {
-                                detectDragGestures(
-                                    onDragStart = {
-                                        activeDraggingId = txtAnn.id
-                                    },
-                                    onDragEnd = {
-                                        // Update state with updated coordinates (safely bounding within sheet canvas on a minimized 0.001f alignment grid)
-                                        val rawX = (txtAnn.x + (itemOffsetX / widthPx))
-                                        val rawY = (txtAnn.y + (itemOffsetY / heightPx))
-                                        val newX = ((rawX / 0.001f).roundToInt() * 0.001f).coerceIn(0f, 0.95f)
-                                        val newY = ((rawY / 0.001f).roundToInt() * 0.001f).coerceIn(0f, 0.95f)
-                                        
-                                        // Update local memory list directly so the UI updates instantly and repeatedly without any lag
-                                        val idxToUpdate = currentTextAnns.indexOfFirst { it.id == txtAnn.id }
-                                        if (idxToUpdate != -1) {
-                                            currentTextAnns[idxToUpdate] = txtAnn.copy(x = newX, y = newY)
-                                        }
-                                        
-                                        val updatedAnns = currentTextAnns.map {
-                                            if (it.id == txtAnn.id) it.copy(x = newX, y = newY) else it
-                                        }
-                                        viewModel.editActivePageAnnotations(updatedAnns)
-                                        itemOffsetX = 0f
-                                        itemOffsetY = 0f
-                                        activeDraggingId = null
-                                    },
-                                    onDragCancel = {
-                                        itemOffsetX = 0f
-                                        itemOffsetY = 0f
-                                        activeDraggingId = null
-                                    },
-                                    onDrag = { change, dragAmount ->
-                                        change.consume()
-                                        itemOffsetX += dragAmount.x / scale
-                                        itemOffsetY += dragAmount.y / scale
-                                    }
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                    update = { frameLayout ->
+                        // Synchronize child views
+                        val currentIds = textAnnsToRender.map { it.id }.toSet()
+                        val toRemove = mutableListOf<android.view.View>()
+                        for (i in 0 until frameLayout.childCount) {
+                            val child = frameLayout.getChildAt(i)
+                            val tagId = child.tag as? String
+                            if (tagId == null || !currentIds.contains(tagId)) {
+                                toRemove.add(child)
+                            }
+                        }
+                        toRemove.forEach { frameLayout.removeView(it) }
+
+                        textAnnsToRender.forEach { txtAnn ->
+                            val existingView = frameLayout.findViewWithTag<AdvancedTextAnnotationView>(txtAnn.id)
+                            val isSelected = selectedAnnotationId == txtAnn.id
+
+                            val view = existingView ?: AdvancedTextAnnotationView(frameLayout.context).apply {
+                                tag = txtAnn.id
+                                val lp = android.widget.FrameLayout.LayoutParams(
+                                    android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+                                    android.widget.FrameLayout.LayoutParams.WRAP_CONTENT
                                 )
+                                frameLayout.addView(this, lp)
                             }
-                            .pointerInput(txtAnn.id) {
-                                detectTapGestures {
-                                    selectedWordToEdit = txtAnn
-                                    editWordTextDraft = txtAnn.text
-                                    editWordFontFamily = txtAnn.fontName
-                                    editWordFontSize = txtAnn.fontSize
-                                    editWordColorHex = txtAnn.colorHex
-                                    editWordBgColorHex = txtAnn.bgColorHex
-                                    editWordHasOutline = txtAnn.hasOutline
-                                    editWordHasUnderline = txtAnn.hasUnderline
-                                    editWordOutlineColorHex = txtAnn.outlineColorHex
-                                    editWordIsBold = txtAnn.isBold
-                                    editWordAlignment = txtAnn.alignment
-                                    editWordIsPowerOf = txtAnn.isPowerOf
-                                    editWordIsItalic = txtAnn.isItalic
-                                    editWordHasStrikeThrough = txtAnn.hasStrikeThrough
-                                    showEditWordDialog = true
-                                }
-                            }
-                            // Align the sticker box based on text alignment to match PDF rendering math perfectly!
-                            .layout { measurable, constraints ->
-                                val placeable = measurable.measure(constraints)
-                                val xShift = when (txtAnn.alignment.lowercase()) {
-                                    "center" -> -placeable.width / 2
-                                    "right" -> -placeable.width
-                                    else -> 0
-                                }
-                                layout(placeable.width, placeable.height) {
-                                    placeable.placeRelative(xShift, 0)
-                                }
-                            }
-                    ) {
-                        // Inner content Box with background and border outline which represents the real PDF bounds!
-                        Box(
-                            modifier = Modifier
-                                .background(backgroundParsedColor, RoundedCornerShape(4.dp))
-                                .then(
-                                    if (txtAnn.hasOutline) {
-                                        Modifier.border(
-                                            width = 2.dp,
-                                            color = Color(try { android.graphics.Color.parseColor(txtAnn.outlineColorHex) } catch (e: Exception) { android.graphics.Color.BLACK }),
-                                            shape = RoundedCornerShape(4.dp)
-                                        )
-                                    } else Modifier
-                                )
-                                .padding(horizontal = 6.dp, vertical = 4.dp)
-                        ) {
-                            Text(
+
+                            // Set visual properties and callbacks
+                            val props = AdvancedTextAnnotationView.AnnotationProperties(
+                                id = txtAnn.id,
                                 text = txtAnn.text,
-                                fontSize = if (txtAnn.isPowerOf) ((txtAnn.fontSize + fontSizeDelta) * 0.72f).coerceAtLeast(6f).sp else (txtAnn.fontSize + fontSizeDelta).coerceAtLeast(8f).sp,
-                                color = Color(try { android.graphics.Color.parseColor(txtAnn.colorHex) } catch (e: Exception) { android.graphics.Color.BLACK }),
-                                fontWeight = if (txtAnn.isBold) FontWeight.Bold else FontWeight.Normal,
-                                fontStyle = if (txtAnn.isItalic) androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal,
-                                fontFamily = getFontFamily(txtAnn.fontName),
-                                textAlign = when (txtAnn.alignment.lowercase()) {
-                                    "center" -> androidx.compose.ui.text.style.TextAlign.Center
-                                    "right" -> androidx.compose.ui.text.style.TextAlign.Right
-                                    else -> androidx.compose.ui.text.style.TextAlign.Start
-                                },
-                                textDecoration = when {
-                                    txtAnn.hasUnderline && txtAnn.hasStrikeThrough -> androidx.compose.ui.text.style.TextDecoration.combine(
-                                        listOf(androidx.compose.ui.text.style.TextDecoration.Underline, androidx.compose.ui.text.style.TextDecoration.LineThrough)
-                                    )
-                                    txtAnn.hasUnderline -> androidx.compose.ui.text.style.TextDecoration.Underline
-                                    txtAnn.hasStrikeThrough -> androidx.compose.ui.text.style.TextDecoration.LineThrough
-                                    else -> androidx.compose.ui.text.style.TextDecoration.None
-                                },
-                                style = androidx.compose.ui.text.TextStyle(
-                                    baselineShift = if (txtAnn.isPowerOf) androidx.compose.ui.text.style.BaselineShift.Superscript else null
-                                )
+                                x = txtAnn.x * pageMeasuredWidthPx,
+                                y = txtAnn.y * pageMeasuredHeightPx,
+                                fontSize = txtAnn.fontSize,
+                                textColorHex = txtAnn.colorHex,
+                                bgColorHex = txtAnn.bgColorHex,
+                                fontName = txtAnn.fontName,
+                                isBold = txtAnn.isBold,
+                                isItalic = txtAnn.isItalic,
+                                hasUnderline = txtAnn.hasUnderline,
+                                hasStrikeThrough = txtAnn.hasStrikeThrough,
+                                hasOutline = txtAnn.hasOutline,
+                                outlineColorHex = txtAnn.outlineColorHex,
+                                alignment = txtAnn.alignment
                             )
-                        }
+                            view.setProperties(props)
+                            view.isSelectedState = isSelected
 
-                        // Drag resize/size control helper icon overlay positioned outside the main PDF bounding box
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.BottomEnd)
-                                .offset(x = 8.dp, y = 8.dp)
-                                .size(18.dp)
-                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.85f), CircleShape)
-                                .pointerInput(txtAnn.id) {
-                                    detectDragGestures(
-                                        onDragStart = {
-                                            activeDraggingId = "${txtAnn.id}_resize"
-                                        },
-                                        onDragEnd = {
-                                            val finalFontSize = (txtAnn.fontSize + fontSizeDelta).coerceIn(8f, 120f)
-                                            val updatedAnns = currentTextAnns.map {
-                                                if (it.id == txtAnn.id) it.copy(fontSize = finalFontSize) else it
-                                            }
-                                            viewModel.editActivePageAnnotations(updatedAnns)
-                                            fontSizeDelta = 0f
-                                            activeDraggingId = null
-                                        },
-                                        onDragCancel = {
-                                            fontSizeDelta = 0f
-                                            activeDraggingId = null
-                                        },
-                                        onDrag = { change, dragAmount ->
-                                            change.consume()
-                                            fontSizeDelta += (dragAmount.x / scale) * 0.15f
-                                        }
-                                    )
-                                }
-                                .padding(2.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                Icons.Default.Crop,
-                                contentDescription = "Resize Font",
-                                tint = Color.White,
-                                modifier = Modifier.size(10.dp)
-                            )
-                        }
-                    }
-                }
-
-                // Render Placeable Signature Overlays
-                currentSignatures.forEach { sigOverlay ->
-                    val resolvedSigProfile = state.signatures.find { it.id == sigOverlay.signatureProfileId }
-                    var signOffsetX by remember(sigOverlay.id) { mutableFloatStateOf(0f) }
-                    var signOffsetY by remember(sigOverlay.id) { mutableFloatStateOf(0f) }
-                    var signWidthDelta by remember(sigOverlay.id) { mutableFloatStateOf(0f) }
-                    var signHeightDelta by remember(sigOverlay.id) { mutableFloatStateOf(0f) }
-
-                    Box(
-                        modifier = Modifier
-                            .offset(
-                                x = widthDp * sigOverlay.x,
-                                y = heightDp * sigOverlay.y
-                            )
-                            .offset { IntOffset(signOffsetX.roundToInt(), signOffsetY.roundToInt()) }
-                            .width((sigOverlay.width + signWidthDelta).coerceIn(60f, 400f).dp)
-                            .height((sigOverlay.height + signHeightDelta).coerceIn(30f, 250f).dp)
-                            .zIndex(if (activeDraggingId == sigOverlay.id || activeDraggingId == "${sigOverlay.id}_resize") 100f else 2f)
-                            .pointerInput(sigOverlay.id) {
-                                awaitPointerEventScope {
-                                    while (true) {
-                                        awaitFirstDown(requireUnconsumed = false)
-                                        activeDraggingId = sigOverlay.id
-                                    }
-                                }
+                            view.onSelected = {
+                                selectedAnnotationId = txtAnn.id
                             }
-                            .pointerInput(sigOverlay.id) {
-                                detectDragGestures(
-                                    onDragStart = {
-                                        activeDraggingId = sigOverlay.id
-                                    },
-                                    onDragEnd = {
-                                        // Update state coordinates (safely bounding within sheet canvas on a minimized 0.001f alignment grid)
-                                        val rawX = (sigOverlay.x + (signOffsetX / widthPx))
-                                        val rawY = (sigOverlay.y + (signOffsetY / heightPx))
-                                        val reX = ((rawX / 0.001f).roundToInt() * 0.001f).coerceIn(0f, 0.95f)
-                                        val reY = ((rawY / 0.001f).roundToInt() * 0.001f).coerceIn(0f, 0.95f)
-                                        
-                                        // Update local memory list directly so the UI updates instantly and repeatedly without any lag
-                                        val idxToUpdate = currentSignatures.indexOfFirst { it.id == sigOverlay.id }
-                                        if (idxToUpdate != -1) {
-                                            currentSignatures[idxToUpdate] = sigOverlay.copy(x = reX, y = reY)
-                                        }
-                                        
-                                        val updatedSignatures = currentSignatures.map {
-                                            if (it.id == sigOverlay.id) it.copy(x = reX, y = reY) else it
-                                        }
-                                        viewModel.editActivePageSignatures(updatedSignatures)
-                                        
-                                        signOffsetX = 0f
-                                        signOffsetY = 0f
-                                        activeDraggingId = null
-                                    },
-                                    onDragCancel = {
-                                        signOffsetX = 0f
-                                        signOffsetY = 0f
-                                        activeDraggingId = null
-                                    },
-                                    onDrag = { change, dragAmount ->
-                                        change.consume()
-                                        signOffsetX += dragAmount.x / scale
-                                        signOffsetY += dragAmount.y / scale
-                                    }
-                                )
+
+                            view.onDeleteRequested = {
+                                val idxLocal = currentTextAnns.indexOfFirst { it.id == txtAnn.id }
+                                if (idxLocal != -1) {
+                                    currentTextAnns.removeAt(idxLocal)
+                                }
+                                viewModel.editActivePageAnnotations(currentTextAnns.toList())
+                                selectedAnnotationId = null
                             }
-                            .border(1.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(4.dp))
-                            .background(Color.Transparent)
-                    ) {
-                        if (resolvedSigProfile != null) {
-                            if (resolvedSigProfile.pathDataJson.startsWith("image:")) {
-                                val imagePath = resolvedSigProfile.pathDataJson.removePrefix("image:")
-                                val bitmap = remember(imagePath) {
-                                    try {
-                                        android.graphics.BitmapFactory.decodeFile(imagePath)
-                                    } catch (e: Exception) {
-                                        null
-                                    }
-                                }
-                                if (bitmap != null) {
-                                    androidx.compose.foundation.Image(
-                                        bitmap = bitmap.asImageBitmap(),
-                                        contentDescription = "Signature Overlay Image",
-                                        modifier = Modifier.fillMaxSize().padding(6.dp),
-                                        contentScale = ContentScale.Fit
-                                    )
-                                } else {
-                                    Text("Image Error", color = Color.Red, fontSize = 10.sp, modifier = Modifier.align(Alignment.Center))
-                                }
-                            } else {
-                                Canvas(modifier = Modifier.fillMaxSize().padding(6.dp)) {
-                                    val vectorPoints = DocumentSerializer.pointsFromJson(resolvedSigProfile.pathDataJson)
-                                    if (vectorPoints.isNotEmpty()) {
-                                        val overlayPath = Path()
-                                        overlayPath.moveTo(vectorPoints.first().x * size.width, vectorPoints.first().y * size.height)
-                                        for (pt in vectorPoints.drop(1)) {
-                                            if (pt.x == -1f && pt.y == -1f) continue
-                                            overlayPath.lineTo(pt.x * size.width, pt.y * size.height)
-                                        }
-                                        drawPath(
-                                            path = overlayPath,
-                                            color = Color(AndroidColor.parseColor(resolvedSigProfile.colorHex)),
-                                            style = Stroke(
-                                                width = resolvedSigProfile.strokeWidth * (size.width / 160f).coerceAtLeast(1.5f),
-                                                cap = StrokeCap.Round,
-                                                join = StrokeJoin.Round
-                                            )
+
+                            view.onPropertiesChanged = { updatedProps ->
+                                val newX = (updatedProps.x / pageMeasuredWidthPx).coerceIn(0f, 0.99f)
+                                val newY = (updatedProps.y / pageMeasuredHeightPx).coerceIn(0f, 0.99f)
+                                val updatedList = currentTextAnns.map {
+                                    if (it.id == txtAnn.id) {
+                                        it.copy(
+                                            x = newX,
+                                            y = newY,
+                                            text = updatedProps.text,
+                                            fontSize = updatedProps.fontSize
                                         )
-                                    }
+                                    } else it
                                 }
+                                viewModel.editActivePageAnnotations(updatedList)
                             }
                         }
-
-                        // Remove overlay badge trigger: small, elegant, offset slightly outside the border, and fully in front!
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .offset(x = 2.dp, y = (-2).dp)
-                                .size(18.dp)
-                                .background(Color.Red, CircleShape)
-                                .clickable { viewModel.removeSignatureOverlay(sigOverlay.id) }
-                                .zIndex(300f),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Remove",
-                                tint = Color.White,
-                                modifier = Modifier.size(10.dp)
+                    }
+                )
+                                   // Render Placeable Signature Overlays
+                AndroidView(
+                    factory = { ctx ->
+                        android.widget.FrameLayout(ctx).apply {
+                            layoutParams = android.widget.FrameLayout.LayoutParams(
+                                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                                android.widget.FrameLayout.LayoutParams.MATCH_PARENT
                             )
                         }
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                    update = { frameLayout ->
+                        // Synchronize child views
+                        val currentIds = currentSignatures.map { it.id }.toSet()
+                        val toRemove = mutableListOf<android.view.View>()
+                        for (i in 0 until frameLayout.childCount) {
+                            val child = frameLayout.getChildAt(i)
+                            val tagId = child.tag as? String
+                            if (tagId == null || !currentIds.contains(tagId)) {
+                                toRemove.add(child)
+                            }
+                        }
+                        toRemove.forEach { frameLayout.removeView(it) }
 
-                        // Resize overlay handle badge at bottom-right corner of Box: small, elegant, offset slightly outside, and fully in front!
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.BottomEnd)
-                                .offset(x = 2.dp, y = 2.dp)
-                                .size(18.dp)
-                                .background(MaterialTheme.colorScheme.primary, CircleShape)
-                                .pointerInput(sigOverlay.id) {
-                                    awaitPointerEventScope {
-                                        while (true) {
-                                            awaitFirstDown(requireUnconsumed = false)
-                                            activeDraggingId = "${sigOverlay.id}_resize"
-                                        }
-                                    }
+                        currentSignatures.forEach { sigOverlay ->
+                            val resolvedSigProfile = state.signatures.find { it.id == sigOverlay.signatureProfileId }
+                            val isSelected = selectedAnnotationId == sigOverlay.id
+
+                            val scaleFactor = (pageMeasuredWidthPx / 400f).coerceAtLeast(0.1f)
+                            val viewWidthPx = (sigOverlay.width * scaleFactor).toInt().coerceAtLeast(30)
+                            val viewHeightPx = (sigOverlay.height * scaleFactor).toInt().coerceAtLeast(15)
+
+                            val existingView = frameLayout.findViewWithTag<ResizableDraggableSignatureView>(sigOverlay.id)
+                            val view = existingView ?: ResizableDraggableSignatureView(frameLayout.context).apply {
+                                tag = sigOverlay.id
+                                val lp = android.widget.FrameLayout.LayoutParams(
+                                    viewWidthPx,
+                                    viewHeightPx
+                                )
+                                frameLayout.addView(this, lp)
+                            }
+
+                            // Apply layouts safely
+                            if (view.layoutParams.width != viewWidthPx || view.layoutParams.height != viewHeightPx) {
+                                view.layoutParams.width = viewWidthPx
+                                view.layoutParams.height = viewHeightPx
+                                view.requestLayout()
+                            }
+
+                            view.isSelectedState = isSelected
+                            view.setSignatureProfile(resolvedSigProfile, sigOverlay.colorHex)
+
+                            // Set coordinates scaled to current view dimension
+                            val pdfX = sigOverlay.x * pageMeasuredWidthPx
+                            val pdfY = sigOverlay.y * pageMeasuredHeightPx
+                            view.setAnnotationPosition(pdfX, pdfY)
+
+                            // Setup view event callbacks
+                            view.onSelected = {
+                                selectedAnnotationId = sigOverlay.id
+                            }
+
+                            view.onDeleteRequested = {
+                                viewModel.removeSignatureOverlay(sigOverlay.id)
+                                selectedAnnotationId = null
+                            }
+
+                            view.onSignatureChanged = { tx, ty, newW, newH ->
+                                val newX = (tx / pageMeasuredWidthPx).coerceIn(0f, 0.99f)
+                                val newY = (ty / pageMeasuredHeightPx).coerceIn(0f, 0.99f)
+
+                                val unscaledW = newW / scaleFactor
+                                val unscaledH = newH / scaleFactor
+
+                                val idxToUpdate = currentSignatures.indexOfFirst { it.id == sigOverlay.id }
+                                if (idxToUpdate != -1) {
+                                    currentSignatures[idxToUpdate] = sigOverlay.copy(x = newX, y = newY, width = unscaledW, height = unscaledH)
                                 }
-                                .pointerInput(sigOverlay.id) {
-                                    detectDragGestures(
-                                        onDragStart = {
-                                            activeDraggingId = "${sigOverlay.id}_resize"
-                                        },
-                                        onDragEnd = {
-                                            val ratio = if (sigOverlay.height > 0f) sigOverlay.width / sigOverlay.height else 2f
-                                            val finalW = (sigOverlay.width + signWidthDelta).coerceIn(60f, 400f)
-                                            val finalH = finalW / ratio
-                                            
-                                            val idxToUpdate = currentSignatures.indexOfFirst { it.id == sigOverlay.id }
-                                            if (idxToUpdate != -1) {
-                                                currentSignatures[idxToUpdate] = sigOverlay.copy(width = finalW, height = finalH)
-                                            }
-                                            
-                                            val updatedSignatures = currentSignatures.map {
-                                                if (it.id == sigOverlay.id) it.copy(width = finalW, height = finalH) else it
-                                            }
-                                            viewModel.editActivePageSignatures(updatedSignatures)
-                                            
-                                            signWidthDelta = 0f
-                                            signHeightDelta = 0f
-                                            activeDraggingId = null
-                                        },
-                                        onDragCancel = {
-                                            signWidthDelta = 0f
-                                            signHeightDelta = 0f
-                                            activeDraggingId = null
-                                        },
-                                        onDrag = { change, dragAmount ->
-                                            change.consume()
-                                            // Proportional scaling based on horizontal drag delta to maintain aspect ratio
-                                            signWidthDelta += dragAmount.x / scale
-                                            val ratio = if (sigOverlay.height > 0f) sigOverlay.width / sigOverlay.height else 2f
-                                            val currentTargetW = sigOverlay.width + signWidthDelta
-                                            val targetH = currentTargetW / ratio
-                                            signHeightDelta = targetH - sigOverlay.height
-                                        }
-                                    )
+
+                                val updatedSignatures = currentSignatures.map {
+                                    if (it.id == sigOverlay.id) it.copy(x = newX, y = newY, width = unscaledW, height = unscaledH) else it
                                 }
-                                .zIndex(300f),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.OpenInFull,
-                                contentDescription = "Resize Signature",
-                                tint = Color.White,
-                                modifier = Modifier.size(10.dp)
-                            )
+                                viewModel.editActivePageSignatures(updatedSignatures)
+                            }
                         }
                     }
-                }
-                } // Clean close for nested BoxWithConstraints
-            }
-
-            // High-fidelity Floating Guidance card for imported files
-            if (activePage.backgroundScanPath != null && activePage.type.lowercase() != "word") {
-                Card(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = 24.dp)
-                        .clickable { viewModel.runOcrAndConvertToWordMode() }
-                        .zIndex(500f),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.95f)
-                    ),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Description,
-                            contentDescription = "Loaded Text Block Icon",
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Column {
-                            Text(
-                                text = "Scan & Convert Page Text",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                            Text(
-                                text = "Tap this text block icon to make it fully editable.",
-                                fontSize = 10.sp,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
-                            )
-                        }
-                    }
-                }
+                )
             }
         }
-    }
+    } // Close the 'else' block for isContinuousScrollMode
+    } // Close BoxWithConstraints (line 5001)
+    } // Close Column (scaffold content)
 
     // Signature Overlay Choice Drawer
         if (showSignatureSelectionDrawer) {
@@ -5058,6 +6550,115 @@ fun EditorScreen(
                             showAddWordDialog = false
                             isAddingTextMode = false
                         }
+                    ) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+
+        if (showPreciseTextPlacementDialog) {
+            AlertDialog(
+                onDismissRequest = { showPreciseTextPlacementDialog = false },
+                title = { Text("Precise Text Annotation Placement", fontWeight = FontWeight.Bold) },
+                text = {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(
+                            "Force this text into an independent, standalone text object using an absolute overlay layer on any page.",
+                            fontSize = 11.sp,
+                            color = Color.Gray
+                        )
+
+                        OutlinedTextField(
+                            value = preciseTextContent,
+                            onValueChange = { preciseTextContent = it },
+                            label = { Text("Text Content") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            OutlinedTextField(
+                                value = precisePageNumberText,
+                                onValueChange = { precisePageNumberText = it },
+                                label = { Text("Page Number (1-${pages.size})") },
+                                modifier = Modifier.weight(1f),
+                                singleLine = true
+                            )
+                        }
+
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            OutlinedTextField(
+                                value = preciseXText,
+                                onValueChange = { preciseXText = it },
+                                label = { Text("X (0.00 - 1.00)") },
+                                modifier = Modifier.weight(1f),
+                                singleLine = true
+                            )
+                            OutlinedTextField(
+                                value = preciseYText,
+                                onValueChange = { preciseYText = it },
+                                label = { Text("Y (0.00 - 1.00)") },
+                                modifier = Modifier.weight(1f),
+                                singleLine = true
+                            )
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            val pageNum = precisePageNumberText.toIntOrNull() ?: (pages.indexOf(activePage) + 1)
+                            val coercedPageNum = pageNum.coerceIn(1, pages.size)
+                            val targetPage = pages[coercedPageNum - 1]
+                            val parsedX = preciseXText.toFloatOrNull() ?: 0.50f
+                            val parsedY = preciseYText.toFloatOrNull() ?: 0.50f
+
+                            val sticker = TextAnnotationDef(
+                                id = UUID.randomUUID().toString(),
+                                text = preciseTextContent.ifBlank { "Standalone Text" },
+                                x = parsedX.coerceIn(0f, 1f),
+                                y = parsedY.coerceIn(0f, 1f),
+                                fontSize = addWordFontSize,
+                                colorHex = addWordColorHex,
+                                fontName = addWordFontFamily,
+                                bgColorHex = addWordBgColorHex,
+                                hasOutline = addWordHasOutline,
+                                hasUnderline = addWordHasUnderline,
+                                outlineColorHex = addWordOutlineColorHex,
+                                hasDoubleUnderline = false,
+                                isBold = addWordIsBold,
+                                alignment = addWordAlignment,
+                                isPowerOf = addWordIsPowerOf,
+                                isItalic = addWordIsItalic,
+                                hasStrikeThrough = addWordHasStrikeThrough
+                            )
+
+                            if (targetPage.id == activePage.id) {
+                                currentTextAnns.add(sticker)
+                                viewModel.editActivePageAnnotations(currentTextAnns.toList())
+                            } else {
+                                val updatedAnns = targetPage.textAnnotations + sticker
+                                viewModel.editPageAnnotations(targetPage.id, updatedAnns)
+                            }
+
+                            showPreciseTextPlacementDialog = false
+                        }
+                    ) {
+                        Text("Place Standalone Text", fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = { showPreciseTextPlacementDialog = false }
                     ) {
                         Text("Cancel")
                     }
@@ -5586,6 +7187,127 @@ fun EditorScreen(
                 }
             )
         }
+
+        if (isPresentationMode) {
+            Dialog(
+                onDismissRequest = { isPresentationMode = false },
+                properties = DialogProperties(usePlatformDefaultWidth = false)
+            ) {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = Color(0xFF0F172A)
+                ) {
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        Column(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            // Title row
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 24.dp, vertical = 16.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Default.Fullscreen,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "PRESENTATION PREVIEW",
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp,
+                                        letterSpacing = 1.sp
+                                    )
+                                }
+                                
+                                IconButton(
+                                    onClick = { isPresentationMode = false },
+                                    modifier = Modifier.background(Color.White.copy(alpha = 0.1f), CircleShape)
+                                ) {
+                                    Icon(Icons.Default.Close, "Exit Preview", tint = Color.White, modifier = Modifier.size(16.dp))
+                                }
+                            }
+                            
+                            // Immersive single page preview
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 32.dp, vertical = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                StaticPagePreview(
+                                    page = activePage,
+                                    state = state,
+                                    viewModel = viewModel,
+                                    modifier = Modifier
+                                        .fillMaxHeight()
+                                        .aspectRatio(0.707f)
+                                )
+                            }
+                            
+                            // Immersive status and navigation controls
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(24.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                IconButton(
+                                    onClick = {
+                                        val activeIdx = pages.indexOf(activePage)
+                                        if (activeIdx > 0) {
+                                            viewModel.setActivePageId(pages[activeIdx - 1].id)
+                                        }
+                                    },
+                                    enabled = pages.indexOf(activePage) > 0,
+                                    modifier = Modifier.background(Color.White.copy(alpha = if (pages.indexOf(activePage) > 0) 0.15f else 0.05f), CircleShape)
+                                ) {
+                                    Icon(Icons.Default.ChevronLeft, "Previous", tint = if (pages.indexOf(activePage) > 0) Color.White else Color.Gray, modifier = Modifier.size(18.dp))
+                                }
+                                
+                                Surface(
+                                    color = Color.Black.copy(alpha = 0.4f),
+                                    shape = RoundedCornerShape(16.dp),
+                                    modifier = Modifier.padding(horizontal = 24.dp)
+                                ) {
+                                    Text(
+                                        text = "PAGE ${pages.indexOf(activePage) + 1} OF ${pages.size}",
+                                        color = Color.White,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                                        letterSpacing = 0.5.sp
+                                    )
+                                }
+                                
+                                IconButton(
+                                    onClick = {
+                                        val activeIdx = pages.indexOf(activePage)
+                                        if (activeIdx < pages.size - 1) {
+                                            viewModel.setActivePageId(pages[activeIdx + 1].id)
+                                        }
+                                    },
+                                    enabled = pages.indexOf(activePage) < pages.size - 1,
+                                    modifier = Modifier.background(Color.White.copy(alpha = if (pages.indexOf(activePage) < pages.size - 1) 0.15f else 0.05f), CircleShape)
+                                ) {
+                                    Icon(Icons.Default.ChevronRight, "Next", tint = if (pages.indexOf(activePage) < pages.size - 1) Color.White else Color.Gray, modifier = Modifier.size(18.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -5617,6 +7339,155 @@ object AndroidBitmapLoader {
 
 // —-- 6. HIGH PERFORMANCE OCR VIEWER SCREEN —--
 
+val tesseractHtml = """
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.0.3/dist/tesseract.min.js"></script>
+  <style>
+    body {
+      font-family: monospace;
+      background-color: #0f172a;
+      color: #38bdf8;
+      padding: 12px;
+      margin: 0;
+      font-size: 11px;
+      line-height: 1.5;
+    }
+    #status {
+      font-weight: bold;
+      color: #34d399;
+      margin-bottom: 8px;
+    }
+    #log {
+      color: #94a3b8;
+    }
+    .err {
+      color: #f87171 !important;
+    }
+  </style>
+</head>
+<body>
+  <div id="status">Initializing Tesseract.js Engine...</div>
+  <div id="log">> Console initialized. Ready.</div>
+
+  <script>
+    function updateStatus(msg) {
+      document.getElementById('status').innerText = msg;
+    }
+    
+    function logMessage(msg, isErr = false) {
+      const logDiv = document.getElementById('log');
+      const cls = isErr ? " class='err'" : "";
+      logDiv.innerHTML += "<br/><span" + cls + ">> " + msg + "</span>";
+      window.scrollTo(0, document.body.scrollHeight);
+    }
+
+    function runTesseractOcr(base64Data) {
+      updateStatus("Processing image bits...");
+      logMessage("Starting Tesseract.js local OCR session");
+      
+      Tesseract.recognize(
+        base64Data,
+        'eng',
+        {
+          logger: m => {
+            if (m.status === 'recognizing text') {
+              const pct = Math.round(m.progress * 100);
+              updateStatus("Recognizing Document text... " + pct + "%");
+              if (window.AndroidBridge) {
+                window.AndroidBridge.onProgress(m.progress);
+              }
+            } else {
+              updateStatus(m.status);
+              logMessage(m.status + (m.progress ? " " + Math.round(m.progress * 100) + "%" : ""));
+            }
+          }
+        }
+      ).then(({ data: { text } }) => {
+        updateStatus("OCR Complete!");
+        logMessage("Verbatim text extracted successfully.");
+        if (window.AndroidBridge) {
+          window.AndroidBridge.onTextRecognized(text);
+        }
+      }).catch(err => {
+        updateStatus("OCR Failed!");
+        logMessage("Error: " + err.toString(), true);
+        if (window.AndroidBridge) {
+          window.AndroidBridge.onError(err.toString());
+        }
+      });
+    }
+  </script>
+</body>
+</html>
+""".trimIndent()
+
+@Composable
+fun TesseractWebViewLoader(
+    base64Image: String,
+    onProgress: (Float) -> Unit,
+    onTextRecognized: (String) -> Unit,
+    onError: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val isLoadedByHtml = remember { mutableStateOf(false) }
+
+    AndroidView(
+        modifier = modifier,
+        factory = { ctx ->
+            WebView(ctx).apply {
+                settings.apply {
+                    javaScriptEnabled = true
+                    domStorageEnabled = true
+                    allowContentAccess = true
+                    allowFileAccess = true
+                    mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                }
+                
+                webViewClient = object : WebViewClient() {
+                    override fun onPageFinished(view: WebView?, url: String?) {
+                        super.onPageFinished(view, url)
+                        if (!isLoadedByHtml.value) {
+                            isLoadedByHtml.value = true
+                            view?.evaluateJavascript("javascript:runTesseractOcr('$base64Image')", null)
+                        }
+                    }
+                }
+                
+                webChromeClient = WebChromeClient()
+                
+                val bridge = object {
+                    @JavascriptInterface
+                    fun onProgress(progress: Float) {
+                        onProgress(progress)
+                    }
+
+                    @JavascriptInterface
+                    fun onTextRecognized(text: String) {
+                        onTextRecognized(text)
+                    }
+
+                    @JavascriptInterface
+                    fun onError(error: String) {
+                        onError(error)
+                    }
+                }
+                
+                addJavascriptInterface(bridge, "AndroidBridge")
+                loadDataWithBaseURL("https://localhost", tesseractHtml, "text/html", "UTF-8", null)
+            }
+        },
+        update = { webView ->
+            if (isLoadedByHtml.value) {
+                webView.evaluateJavascript("javascript:runTesseractOcr('$base64Image')", null)
+            }
+        }
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun OcrScreen(
@@ -5629,13 +7500,20 @@ fun OcrScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Gemini OCR Recognition", fontWeight = FontWeight.Bold) },
+                title = { Text("OCR Text Recognition", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
-                    IconButton(onClick = { viewModel.navigateTo(Screen.DocumentEditor) }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back To Editor")
+                    IconButton(onClick = { viewModel.navigateTo(Screen.Dashboard) }) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back To Dashboard")
                     }
                 },
                 actions = {
+                    IconButton(
+                        onClick = {
+                            viewModel.runOcrOnActivePage()
+                        }
+                    ) {
+                        Icon(Icons.Default.Refresh, "Retry Scan")
+                    }
                     IconButton(
                         onClick = {
                             val txt = state.ocrTextResult ?: ""
@@ -5660,6 +7538,53 @@ fun OcrScreen(
                 .background(MaterialTheme.colorScheme.background)
                 .padding(16.dp)
         ) {
+            // Engine selection Segmented Control
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                listOf("Gemini", "TesseractJS").forEach { engine ->
+                    val isSelected = state.ocrEngine == engine
+                    val btnBg = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent
+                    val btnText = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                    
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(btnBg)
+                            .clickable {
+                                viewModel.updateOcrEngine(engine)
+                                viewModel.runOcrOnActivePage()
+                            }
+                            .padding(vertical = 10.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = if (engine == "Gemini") Icons.Default.Star else Icons.Default.Code,
+                                contentDescription = null,
+                                tint = btnText,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (engine == "Gemini") "Gemini LLM" else "Tesseract.js Engine",
+                                color = btnText,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
@@ -5672,7 +7597,11 @@ fun OcrScreen(
                     Spacer(modifier = Modifier.width(10.dp))
                     Column {
                         Text("Active Document: ${state.ocrDocTitle}", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                        Text("Engine: Gemini Core OCR Parsing", fontSize = 11.sp, color = Color.Gray)
+                        Text(
+                            text = if (state.ocrEngine == "Gemini") "Engine: Gemini Core Cloud OCR" else "Engine: Offline Tesseract.js (WebAssembly)",
+                            fontSize = 11.sp,
+                            color = Color.Gray
+                        )
                     }
                 }
             }
@@ -5680,22 +7609,96 @@ fun OcrScreen(
             Spacer(modifier = Modifier.height(16.dp))
 
             if (state.ocrLoading) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-                    Spacer(modifier = Modifier.height(14.dp))
-                    Text(
-                        "Reading camera pixel channels layout...",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.secondary
-                    )
-                    Text("Deconstructing document lines with AI", fontSize = 11.sp, color = Color.Gray)
+                if (state.ocrEngine == "TesseractJS") {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Top
+                    ) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            "Tesseract.js OCR Engine",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            "Local high-compatibility JS WebAssembly execution",
+                            fontSize = 11.sp,
+                            color = Color.Gray
+                        )
+                        
+                        Spacer(modifier = Modifier.height(24.dp))
+                        
+                        val pct = (state.ocrProgress * 100).toInt()
+                        Text(
+                            "Extraction Progress: $pct%",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.secondary
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        LinearProgressIndicator(
+                            progress = { state.ocrProgress },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(8.dp)
+                                .clip(RoundedCornerShape(4.dp)),
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        
+                        Spacer(modifier = Modifier.height(24.dp))
+                        Text("LIVE JS CONSOLE LOGS:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.secondary, modifier = Modifier.align(Alignment.Start))
+                        Spacer(modifier = Modifier.height(6.dp))
+                        
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(220.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .border(1.dp, Color.Gray, RoundedCornerShape(12.dp))
+                        ) {
+                            if (state.ocrBase64Image != null) {
+                                TesseractWebViewLoader(
+                                    base64Image = state.ocrBase64Image,
+                                    onProgress = { viewModel.updateOcrProgress(it) },
+                                    onTextRecognized = { viewModel.saveOcrResult(it) },
+                                    onError = { viewModel.saveOcrResult("Tesseract OCR Error: $it") },
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(Color(0x0A000000)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text("Converting page raster channels...", fontSize = 11.sp, color = Color.Gray)
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                        Spacer(modifier = Modifier.height(14.dp))
+                        Text(
+                            "Reading camera pixel channels layout...",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.secondary
+                        )
+                        Text("Deconstructing document lines with AI", fontSize = 11.sp, color = Color.Gray)
+                    }
                 }
             } else {
                 Text("RECOGNIZED TEXT RESULTS:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.secondary)
@@ -5861,7 +7864,7 @@ fun MergerScreen(
                                         .clip(RoundedCornerShape(6.dp))
                                 ) {
                                     if (page.backgroundScanPath != null && File(page.backgroundScanPath).exists()) {
-                                        val bitmap = remember(page.id) { AndroidBitmapLoader.load(page.backgroundScanPath) }
+                                        val bitmap = remember(page.id, page.backgroundScanPath) { AndroidBitmapLoader.load(page.backgroundScanPath) }
                                         if (bitmap != null) {
                                             Image(
                                                 bitmap = bitmap.asImageBitmap(),
@@ -6295,6 +8298,868 @@ fun isTapNearDrawing(tapX: Float, tapY: Float, drawing: DrawingDef): Boolean {
                 val dx = tapX - pt.x
                 val dy = tapY - pt.y
                 (dx * dx + dy * dy) < 0.002f
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun IdScanCameraScreen(
+    state: UiState,
+    viewModel: MainViewModel
+) {
+    val context = LocalContext.current
+    var imageCapture: androidx.camera.core.ImageCapture? by remember { mutableStateOf(null) }
+
+    // Camera permission check
+    var hasCameraPermission by remember {
+        mutableStateOf(
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.CAMERA
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        )
+    }
+
+    var liveCameraMode by remember { mutableStateOf(false) }
+    LaunchedEffect(hasCameraPermission) {
+        if (hasCameraPermission) {
+            liveCameraMode = true
+        }
+    }
+
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        hasCameraPermission = isGranted
+        liveCameraMode = isGranted
+        if (isGranted) {
+            viewModel.triggerFeedback("Live hardware camera active!")
+        } else {
+            viewModel.triggerFeedback("Using high-fidelity scanner sandbox.")
+        }
+    }
+
+    // Gallery picker launcher
+    val galleryPickerLauncher = rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            try {
+                val inputStream = context.contentResolver.openInputStream(uri)
+                val selectedBmp = android.graphics.BitmapFactory.decodeStream(inputStream)
+                inputStream?.close()
+                if (selectedBmp != null) {
+                    if (!state.isScanningIdBack) {
+                        viewModel.captureIdCardFront(selectedBmp)
+                        viewModel.triggerFeedback("ID Card Front captured! Open scanner for Back side.")
+                    } else {
+                        viewModel.captureIdCardBack(selectedBmp)
+                        viewModel.navigateTo(Screen.IdScanEdit)
+                    }
+                } else {
+                    android.widget.Toast.makeText(context, "Unable to load image.", android.widget.Toast.LENGTH_LONG).show()
+                }
+            } catch (e: Exception) {
+                android.widget.Toast.makeText(context, "Gallery import error: ${e.localizedMessage}", android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    val onSnapPage = {
+        if (liveCameraMode && hasCameraPermission && imageCapture != null) {
+            val capture = imageCapture
+            if (capture != null) {
+                capture.takePicture(
+                    androidx.core.content.ContextCompat.getMainExecutor(context),
+                    object : androidx.camera.core.ImageCapture.OnImageCapturedCallback() {
+                        override fun onCaptureSuccess(image: androidx.camera.core.ImageProxy) {
+                            val bitmap = imageProxyToBitmap(image)
+                            image.close()
+                            if (bitmap != null) {
+                                if (!state.isScanningIdBack) {
+                                    viewModel.captureIdCardFront(bitmap)
+                                    viewModel.triggerFeedback("ID Card Front captured! Open scanner for Back side.")
+                                } else {
+                                    viewModel.captureIdCardBack(bitmap)
+                                    viewModel.navigateTo(Screen.IdScanEdit)
+                                }
+                            } else {
+                                val mock = createMockIdentityCard(isFront = !state.isScanningIdBack)
+                                if (!state.isScanningIdBack) {
+                                    viewModel.captureIdCardFront(mock)
+                                    viewModel.triggerFeedback("ID Card Front captured (Fallback)! Open scanner for Back side.")
+                                } else {
+                                    viewModel.captureIdCardBack(mock)
+                                    viewModel.navigateTo(Screen.IdScanEdit)
+                                }
+                            }
+                        }
+
+                        override fun onError(exception: androidx.camera.core.ImageCaptureException) {
+                            val mock = createMockIdentityCard(isFront = !state.isScanningIdBack)
+                            if (!state.isScanningIdBack) {
+                                viewModel.captureIdCardFront(mock)
+                                viewModel.triggerFeedback("ID Card Front captured (Error Fallback)! Open scanner for Back side.")
+                            } else {
+                                viewModel.captureIdCardBack(mock)
+                                viewModel.navigateTo(Screen.IdScanEdit)
+                            }
+                        }
+                    }
+                )
+            }
+        } else {
+            // Sandbox Simulation Mode!
+            val mock = createMockIdentityCard(isFront = !state.isScanningIdBack)
+            if (!state.isScanningIdBack) {
+                viewModel.captureIdCardFront(mock)
+                viewModel.triggerFeedback("ID Card Front captured in Sandbox! Now open scanner for Back side.")
+            } else {
+                viewModel.captureIdCardBack(mock)
+                viewModel.navigateTo(Screen.IdScanEdit)
+            }
+        }
+    }
+
+    val infiniteTransition = rememberInfiniteTransition(label = "Laser")
+    val laserYOffset by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 2800, easing = androidx.compose.animation.core.LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "LaserFloat"
+    )
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Column {
+                        Text("ID Security Scan Lab", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        Text(
+                            text = if (liveCameraMode) "🟢 LIVE DEVICE HARDWARE CAMERA" else "📡 ACTIVE HIGH-FIDELITY SANDBOX",
+                            fontSize = 10.sp,
+                            color = if (liveCameraMode) Color.Green else Color(0xFF38BDF8),
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                },
+                navigationIcon = {
+                    IconButton(onClick = { viewModel.navigateTo(Screen.Dashboard) }) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Dashboard")
+                    }
+                }
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .background(Color(0xFF0B0F19))
+                .padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            val currentStepLabel = if (!state.isScanningIdBack) "Scan Front Side of ID Card" else "Scan Back Side of ID Card"
+            val currentInstruction = if (!state.isScanningIdBack) {
+                "Hold steady. Align the Front Side of your card inside the bounding frame."
+            } else {
+                "Front captured successfully! Now align the Back Side of your card in the frame."
+            }
+
+            Text(
+                text = currentStepLabel,
+                color = Color(0xFF10AC84),
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 4.dp)
+            )
+
+            Text(
+                text = currentInstruction,
+                color = Color.White.copy(alpha = 0.7f),
+                fontSize = 11.sp,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                modifier = Modifier.padding(bottom = 12.dp)
+            )
+
+            // Viewfinder
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .background(Color(0xFF111827), RoundedCornerShape(24.dp))
+                    .border(
+                        BorderStroke(2.dp, Color(0xFF38BDF8).copy(alpha = 0.4f)),
+                        RoundedCornerShape(24.dp)
+                    )
+                    .clip(RoundedCornerShape(24.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                if (liveCameraMode && hasCameraPermission) {
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        CameraPreviewView(
+                            modifier = Modifier.fillMaxSize(),
+                            onImageCaptureCreated = { imageCapture = it },
+                            onCornersDetected = {}
+                        )
+
+                        // Laser scan sweep
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .drawBehind {
+                                    val yPos = size.height * laserYOffset
+                                    val brush = Brush.verticalGradient(
+                                        colors = listOf(
+                                            Color.Green.copy(alpha = 0f),
+                                            Color.Green.copy(alpha = 0.4f),
+                                            Color.Green.copy(alpha = 0f)
+                                        ),
+                                        startY = yPos - 40f,
+                                        endY = yPos + 40f
+                                    )
+                                    drawRect(
+                                        brush = brush,
+                                        topLeft = androidx.compose.ui.geometry.Offset(0f, yPos - 40f),
+                                        size = androidx.compose.ui.geometry.Size(size.width, 80f)
+                                    )
+                                    drawLine(
+                                        color = Color.Green,
+                                        start = androidx.compose.ui.geometry.Offset(0f, yPos),
+                                        end = androidx.compose.ui.geometry.Offset(size.width, yPos),
+                                        strokeWidth = 3f
+                                    )
+                                }
+                        )
+                    }
+                } else {
+                    // Sandbox visual representation
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.radialGradient(
+                                    colors = listOf(Color(0xFF1E293B), Color(0xFF0F172A))
+                                )
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        // Laser sweep
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .drawBehind {
+                                    val yPos = size.height * laserYOffset
+                                    val brush = Brush.verticalGradient(
+                                        colors = listOf(
+                                            Color(0xFF38BDF8).copy(alpha = 0f),
+                                            Color(0xFF38BDF8).copy(alpha = 0.3f),
+                                            Color(0xFF38BDF8).copy(alpha = 0f)
+                                        ),
+                                        startY = yPos - 40f,
+                                        endY = yPos + 40f
+                                    )
+                                    drawRect(
+                                        brush = brush,
+                                        topLeft = androidx.compose.ui.geometry.Offset(0f, yPos - 40f),
+                                        size = androidx.compose.ui.geometry.Size(size.width, 80f)
+                                    )
+                                    drawLine(
+                                        color = Color(0xFF38BDF8),
+                                        start = androidx.compose.ui.geometry.Offset(0f, yPos),
+                                        end = androidx.compose.ui.geometry.Offset(size.width, yPos),
+                                        strokeWidth = 2f
+                                    )
+                                }
+                        )
+
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                            modifier = Modifier.padding(24.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(64.dp)
+                                    .background(Color(0xFF0369A1).copy(alpha = 0.2f), CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CreditCard,
+                                    contentDescription = null,
+                                    tint = Color(0xFF38BDF8),
+                                    modifier = Modifier.size(32.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                text = "SANDBOX ID CARD SCANNER",
+                                color = Color.White,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "Virtual high-fidelity capture active. Tap Snap below to simulate card framing.",
+                                color = Color.White.copy(alpha = 0.5f),
+                                fontSize = 11.sp,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                lineHeight = 16.sp
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Snap & Controls deck
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Import Gallery button
+                IconButton(
+                    onClick = { galleryPickerLauncher.launch("image/*") },
+                    modifier = Modifier
+                        .size(54.dp)
+                        .background(Color(0xFF1E293B), CircleShape)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PhotoLibrary,
+                        contentDescription = "Gallery",
+                        tint = Color.White
+                    )
+                }
+
+                // Primary Snap Button
+                Button(
+                    onClick = { onSnapPage() },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10AC84)),
+                    shape = CircleShape,
+                    modifier = Modifier
+                        .height(56.dp)
+                        .weight(1f)
+                        .padding(horizontal = 16.dp)
+                        .testTag("id_scanner_snap_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.CameraAlt,
+                        contentDescription = "Snap",
+                        tint = Color.White
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (!state.isScanningIdBack) "SNAP FRONT SIDE" else "SNAP BACK SIDE",
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                }
+
+                // Preset Loader button
+                IconButton(
+                    onClick = {
+                        val card = createMockIdentityCard(isFront = !state.isScanningIdBack)
+                        if (!state.isScanningIdBack) {
+                            viewModel.captureIdCardFront(card)
+                            viewModel.triggerFeedback("Loaded ID Card Front Side Preset!")
+                        } else {
+                            viewModel.captureIdCardBack(card)
+                            viewModel.triggerFeedback("Loaded ID Card Back Side Preset! Opening Filter Page.")
+                            viewModel.navigateTo(Screen.IdScanEdit)
+                        }
+                    },
+                    modifier = Modifier
+                        .size(54.dp)
+                        .background(Color(0xFF1E293B), CircleShape)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.CreditCard,
+                        contentDescription = "Load Mock ID",
+                        tint = Color(0xFF10AC84)
+                    )
+                }
+            }
+
+            if (!hasCameraPermission) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Card(
+                    onClick = { cameraPermissionLauncher.launch(android.Manifest.permission.CAMERA) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(Icons.Default.Camera, "Camera Permission", tint = Color(0xFF38BDF8))
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            "Tap to authorize Live Device Camera",
+                            color = Color.White,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun IdScanEditScreen(
+    state: UiState,
+    viewModel: MainViewModel
+) {
+    var docTitle by remember { mutableStateOf("Unified ID Card Scan") }
+
+    val baseFront = state.idCardFrontBitmap
+    val baseBack = state.idCardBackBitmap
+
+    val filteredFront = remember(baseFront, state.idScanFilterType) {
+        if (baseFront != null) viewModel.applyFilterToBitmap(baseFront, state.idScanFilterType) else null
+    }
+    val filteredBack = remember(baseBack, state.idScanFilterType) {
+        if (baseBack != null) viewModel.applyFilterToBitmap(baseBack, state.idScanFilterType) else null
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("ID Card Preview", fontWeight = FontWeight.Bold) },
+                navigationIcon = {
+                    IconButton(onClick = { viewModel.navigateTo(Screen.IdScanCamera) }) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    Button(
+                        onClick = {
+                            viewModel.saveIdCardA4Document(docTitle)
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10AC84))
+                    ) {
+                        Text("SAVE")
+                    }
+                }
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .background(MaterialTheme.colorScheme.background)
+                .padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            TextField(
+                value = docTitle,
+                onValueChange = { docTitle = it },
+                label = { Text("Document Filename") },
+                placeholder = { Text("e.g. ID Card unified") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // A4 Layout Preview
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .background(Color(0xFF0F172A), RoundedCornerShape(12.dp))
+                    .padding(16.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .aspectRatio(1f / 1.414f)
+                        .background(Color.White, RoundedCornerShape(8.dp))
+                        .border(BorderStroke(1.dp, Color.LightGray), RoundedCornerShape(8.dp))
+                        .padding(16.dp)
+                ) {
+                    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                        val scale = maxWidth / 210f
+                        val cardWidthDp = scale * 86f
+                        val cardHeightDp = scale * 54f
+
+                        Column(
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.SpaceEvenly,
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            // Front Side portion
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                if (filteredFront != null) {
+                                    Image(
+                                        bitmap = filteredFront.asImageBitmap(),
+                                        contentDescription = "Front side preview",
+                                        modifier = Modifier
+                                            .size(width = cardWidthDp, height = cardHeightDp)
+                                            .border(BorderStroke(1.dp, Color(0xFFCBD5E1)), RoundedCornerShape(4.dp))
+                                            .clip(RoundedCornerShape(4.dp)),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                } else {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(width = cardWidthDp, height = cardHeightDp)
+                                            .background(Color(0xFFE2E8F0), RoundedCornerShape(4.dp)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text("No Front Side Captured", color = Color(0xFF64748B), fontSize = 11.sp)
+                                    }
+                                }
+                            }
+
+                            // Divider
+                            HorizontalDivider(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp), color = Color(0xFFE2E8F0))
+
+                            // Back Side portion
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                if (filteredBack != null) {
+                                    Image(
+                                        bitmap = filteredBack.asImageBitmap(),
+                                        contentDescription = "Back side preview",
+                                        modifier = Modifier
+                                            .size(width = cardWidthDp, height = cardHeightDp)
+                                            .border(BorderStroke(1.dp, Color(0xFFCBD5E1)), RoundedCornerShape(4.dp))
+                                            .clip(RoundedCornerShape(4.dp)),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                } else {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(width = cardWidthDp, height = cardHeightDp)
+                                            .background(Color(0xFFE2E8F0), RoundedCornerShape(4.dp)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text("No Back Side Captured", color = Color(0xFF64748B), fontSize = 11.sp)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Converts screen-space touch coordinates to page-relative coordinate space (0..pageWidth, 0..pageHeight),
+ * taking into account the page container's screen position, rotation, scale, and pan offsets.
+ */
+private fun convScreenPtToPagePt(
+    screenX: Float,
+    screenY: Float,
+    pageWidthPx: Float,
+    pageHeightPx: Float,
+    pagePositionOnScreenX: Float,
+    pagePositionOnScreenY: Float,
+    scale: Float,
+    offsetX: Float,
+    offsetY: Float,
+    rotationDegrees: Float
+): android.graphics.PointF {
+    val matrix = android.graphics.Matrix()
+    
+    // Calculate the touch relative to the page container position on screen
+    val localX = screenX - pagePositionOnScreenX
+    val localY = screenY - pagePositionOnScreenY
+
+    // Construct the forward transformation applied by graphicsLayer:
+    matrix.postTranslate(-pageWidthPx / 2f, -pageHeightPx / 2f)
+    matrix.postRotate(rotationDegrees)
+    matrix.postScale(scale, scale)
+    matrix.postTranslate(pageWidthPx / 2f + offsetX, pageHeightPx / 2f + offsetY)
+
+    // Invert the transformation to map from Screen/Container coordinates back to unscaled PDF Page space
+    val inverse = android.graphics.Matrix()
+    matrix.invert(inverse)
+
+    val pts = floatArrayOf(localX, localY)
+    inverse.mapPoints(pts)
+
+    return android.graphics.PointF(pts[0], pts[1])
+}
+
+/**
+ * Safely accesses the native Android MotionEvent via reflection to avoid compile issues
+ * with Compose's internal visibility rules on getMotionEvent.
+ */
+private fun getNativeMotionEvent(pointerEvent: androidx.compose.ui.input.pointer.PointerEvent): android.view.MotionEvent? {
+    return try {
+        val method = pointerEvent::class.java.methods.firstOrNull { it.name == "getMotionEvent" }
+        method?.invoke(pointerEvent) as? android.view.MotionEvent
+    } catch (e: Exception) {
+        null
+    }
+}
+
+@Composable
+fun StaticPagePreview(
+    page: PageDef,
+    state: UiState,
+    viewModel: MainViewModel,
+    modifier: Modifier = Modifier
+) {
+    val isLandscape = page.rotationDegrees % 180 != 0
+    val pageRatio = 0.707f
+
+    Card(
+        modifier = modifier
+            .aspectRatio(pageRatio)
+            .shadow(6.dp, RoundedCornerShape(4.dp))
+            .background(Color.White),
+        shape = RoundedCornerShape(4.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White)
+    ) {
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val widthDp = maxWidth
+            val heightDp = maxHeight
+            
+            // 1. Background image
+            if (page.backgroundScanPath != null) {
+                val file = java.io.File(page.backgroundScanPath)
+                if (file.exists()) {
+                    val bitmap = remember(page.id, page.filterType, page.backgroundScanPath) {
+                        val base = AndroidBitmapLoader.load(file.absolutePath)
+                        if (base != null && page.filterType != "original") {
+                            viewModel.applyFilterToBitmap(base, page.filterType)
+                        } else {
+                            base
+                        }
+                    }
+                    if (bitmap != null) {
+                        Image(
+                            bitmap = bitmap.asImageBitmap(),
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Fit
+                        )
+                    }
+                }
+            }
+            
+            // 2. Base vector template background
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                when (page.type.lowercase()) {
+                    "lined" -> {
+                        val leftMargin = size.width * 0.15f
+                        drawLine(Color(0xFFE09090), Offset(leftMargin, 0f), Offset(leftMargin, size.height), 2f)
+                        var lineY = size.height * 0.08f
+                        while (lineY < size.height * 0.95f) {
+                            drawLine(Color(0xFFC5D3E8), Offset(0f, lineY), Offset(size.width, lineY), 1.5f)
+                            lineY += 36f
+                        }
+                    }
+                    "cornell" -> {
+                        drawLine(Color(0xFF80B3D6), Offset(0f, size.height * 0.08f), Offset(size.width, size.height * 0.08f), 3f)
+                        drawLine(Color(0xFF80B3D6), Offset(size.width * 0.3f, size.height * 0.08f), Offset(size.width * 0.3f, size.height * 0.85f), 3f)
+                        drawLine(Color(0xFF80B3D6), Offset(0f, size.height * 0.85f), Offset(size.width, size.height * 0.85f), 3f)
+                    }
+                }
+                
+                // 3. Draw drawings
+                for (draw in page.drawings) {
+                    if (draw.points.size < 2) continue
+                    val baseColor = try { Color(AndroidColor.parseColor(draw.colorHex)) } catch (e: Exception) { Color.Black }
+                    val drawColor = if (draw.isHighlighter) baseColor.copy(alpha = 0.45f) else baseColor
+                    val scaledStrokeWidth = draw.strokeWidth * (size.width / 400f)
+                    val pathStyle = Stroke(
+                        width = scaledStrokeWidth,
+                        cap = StrokeCap.Round,
+                        join = StrokeJoin.Round,
+                        pathEffect = if (draw.isDashed) androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(15f * (size.width / 400f), 15f * (size.width / 400f)), 0f) else null
+                    )
+                    
+                    when (draw.shapeType.lowercase()) {
+                        "line" -> {
+                            val start = draw.points.first()
+                            val end = draw.points.last()
+                            drawLine(
+                                color = drawColor,
+                                start = Offset(start.x * size.width, start.y * size.height),
+                                end = Offset(end.x * size.width, end.y * size.height),
+                                strokeWidth = scaledStrokeWidth,
+                                cap = StrokeCap.Round,
+                                pathEffect = if (draw.isDashed) androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(15f * (size.width / 400f), 15f * (size.width / 400f)), 0f) else null
+                            )
+                        }
+                        "box" -> {
+                            val start = draw.points.first()
+                            val end = draw.points.last()
+                            val left = minOf(start.x, end.x) * size.width
+                            val top = minOf(start.y, end.y) * size.height
+                            val right = maxOf(start.x, end.x) * size.width
+                            val bottom = maxOf(start.y, end.y) * size.height
+                            drawRect(
+                                color = drawColor,
+                                topLeft = Offset(left, top),
+                                size = androidx.compose.ui.geometry.Size(right - left, bottom - top),
+                                style = pathStyle
+                            )
+                        }
+                        "redact" -> {
+                            val start = draw.points.first()
+                            val end = draw.points.last()
+                            val left = minOf(start.x, end.x) * size.width
+                            val top = minOf(start.y, end.y) * size.height
+                            val right = maxOf(start.x, end.x) * size.width
+                            val bottom = maxOf(start.y, end.y) * size.height
+                            drawRect(
+                                color = Color.Black,
+                                topLeft = Offset(left, top),
+                                size = androidx.compose.ui.geometry.Size(right - left, bottom - top),
+                                style = androidx.compose.ui.graphics.drawscope.Fill
+                            )
+                            drawRect(
+                                color = Color(0xFFEF4444),
+                                topLeft = Offset(left, top),
+                                size = androidx.compose.ui.geometry.Size(right - left, bottom - top),
+                                style = Stroke(
+                                    width = 1.5f * (size.width / 400f),
+                                    pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(10f, 10f), 0f)
+                                )
+                            )
+                        }
+                        "circle" -> {
+                            val start = draw.points.first()
+                            val end = draw.points.last()
+                            val left = minOf(start.x, end.x) * size.width
+                            val top = minOf(start.y, end.y) * size.height
+                            val right = maxOf(start.x, end.x) * size.width
+                            val bottom = maxOf(start.y, end.y) * size.height
+                            drawOval(
+                                color = drawColor,
+                                topLeft = Offset(left, top),
+                                size = androidx.compose.ui.geometry.Size(right - left, bottom - top),
+                                style = pathStyle
+                            )
+                        }
+                        else -> {
+                            val path = Path()
+                            path.moveTo(draw.points.first().x * size.width, draw.points.first().y * size.height)
+                            for (pt in draw.points.drop(1)) {
+                                path.lineTo(pt.x * size.width, pt.y * size.height)
+                            }
+                            drawPath(
+                                path = path,
+                                color = drawColor,
+                                style = pathStyle
+                            )
+                        }
+                    }
+                }
+            }
+            
+            // 4. Draw text annotations
+            page.textAnnotations.forEach { txtAnn ->
+                val isBgTransparent = txtAnn.bgColorHex.lowercase() == "transparent" || txtAnn.bgColorHex.isBlank()
+                val backgroundParsedColor = if (isBgTransparent) Color.Transparent else {
+                    try { Color(AndroidColor.parseColor(txtAnn.bgColorHex)) } catch (e: Exception) { Color.Transparent }
+                }
+                val textColor = try { Color(AndroidColor.parseColor(txtAnn.colorHex)) } catch (e: Exception) { Color.Black }
+                
+                Box(
+                    modifier = Modifier
+                        .offset(
+                            x = widthDp * txtAnn.x,
+                            y = heightDp * txtAnn.y
+                        )
+                        .background(backgroundParsedColor, RoundedCornerShape(2.dp))
+                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = txtAnn.text,
+                        color = textColor,
+                        fontSize = (txtAnn.fontSize * (widthDp.value / 400f)).sp,
+                        fontFamily = getFontFamily(txtAnn.fontName),
+                        fontWeight = if (txtAnn.isBold) FontWeight.Bold else FontWeight.Normal,
+                        fontStyle = if (txtAnn.isItalic) FontStyle.Italic else FontStyle.Normal,
+                        textDecoration = androidx.compose.ui.text.style.TextDecoration.combine(
+                            buildList {
+                                if (txtAnn.hasUnderline) add(androidx.compose.ui.text.style.TextDecoration.Underline)
+                                if (txtAnn.hasStrikeThrough) add(androidx.compose.ui.text.style.TextDecoration.LineThrough)
+                            }
+                        )
+                    )
+                }
+            }
+            
+            // 5. Draw signatures
+            page.signatures.forEach { sig ->
+                val resolvedSigProfile = state.signatures.find { it.id == sig.signatureProfileId }
+                if (resolvedSigProfile != null) {
+                    Box(
+                        modifier = Modifier
+                            .offset(
+                                x = widthDp * sig.x,
+                                y = heightDp * sig.y
+                            )
+                            .size(
+                                width = widthDp * (sig.width / 400f),
+                                height = widthDp * (sig.height / 400f)
+                            )
+                    ) {
+                        if (resolvedSigProfile.pathDataJson.startsWith("image:")) {
+                            val imagePath = resolvedSigProfile.pathDataJson.removePrefix("image:")
+                            val bitmap = remember(imagePath) {
+                                try {
+                                    android.graphics.BitmapFactory.decodeFile(imagePath)
+                                } catch (e: Exception) {
+                                    null
+                                }
+                            }
+                            if (bitmap != null) {
+                                Image(
+                                    bitmap = bitmap.asImageBitmap(),
+                                    contentDescription = null,
+                                    modifier = Modifier.fillMaxSize().padding(6.dp),
+                                    contentScale = ContentScale.Fit
+                                )
+                            }
+                        } else {
+                            Canvas(modifier = Modifier.fillMaxSize().padding(6.dp)) {
+                                val vectorPoints = DocumentSerializer.pointsFromJson(resolvedSigProfile.pathDataJson)
+                                if (vectorPoints.isNotEmpty()) {
+                                    val overlayPath = Path()
+                                    overlayPath.moveTo(vectorPoints.first().x * size.width, vectorPoints.first().y * size.height)
+                                    for (pt in vectorPoints.drop(1)) {
+                                        if (pt.x == -1f && pt.y == -1f) continue
+                                        overlayPath.lineTo(pt.x * size.width, pt.y * size.height)
+                                    }
+                                    drawPath(
+                                        path = overlayPath,
+                                        color = try { Color(AndroidColor.parseColor(resolvedSigProfile.colorHex)) } catch (e: Exception) { Color.Black },
+                                        style = Stroke(
+                                            width = resolvedSigProfile.strokeWidth * (size.width / 160f),
+                                            cap = StrokeCap.Round,
+                                            join = StrokeJoin.Round
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }

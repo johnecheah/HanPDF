@@ -10,6 +10,78 @@ import java.io.FileOutputStream
 object PdfGenerator {
     private const val TAG = "PdfGenerator"
 
+    private fun getPageSizePoints(page: PageDef): Pair<Int, Int> {
+        if (page.backgroundScanPath != null) {
+            val file = File(page.backgroundScanPath)
+            if (file.exists()) {
+                val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeFile(file.absolutePath, options)
+                val origW = options.outWidth
+                val origH = options.outHeight
+                if (origW > 0 && origH > 0) {
+                    val ratio = origW.toFloat() / origH.toFloat()
+                    return if (origH >= origW) {
+                        // Portrait: set height to 842 points (Standard A4 Height)
+                        val h = 842
+                        val w = (842 * ratio).toInt()
+                        Pair(w, h)
+                    } else {
+                        // Landscape: set width to 842 points (Standard A4 Width)
+                        val w = 842
+                        val h = (842 / ratio).toInt()
+                        Pair(w, h)
+                    }
+                }
+            }
+        }
+        // Default standard A4 size (portrait)
+        return Pair(595, 842)
+    }
+
+    private fun decodeAndScaleBackground(path: String, maxDim: Int = 2480): Bitmap? {
+        val file = File(path)
+        if (!file.exists()) return null
+        try {
+            val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(file.absolutePath, options)
+            val origW = options.outWidth
+            val origH = options.outHeight
+            if (origW <= 0 || origH <= 0) return null
+
+            var sampleSize = 1
+            val largestDim = maxOf(origW, origH)
+            while (largestDim / sampleSize > maxDim * 2) {
+                sampleSize *= 2
+            }
+
+            val decodeOptions = BitmapFactory.Options().apply {
+                inSampleSize = sampleSize
+                inPreferredConfig = Bitmap.Config.RGB_565 // Uses 50% less memory and is extremely fast to decode/draw
+            }
+            val sampledBmp = BitmapFactory.decodeFile(file.absolutePath, decodeOptions) ?: return null
+
+            val currentW = sampledBmp.width
+            val currentH = sampledBmp.height
+            val currentLargest = maxOf(currentW, currentH)
+
+            return if (currentLargest > maxDim) {
+                val scale = maxDim.toFloat() / currentLargest
+                val targetW = (currentW * scale).toInt()
+                val targetH = (currentH * scale).toInt()
+                val scaledBmp = Bitmap.createScaledBitmap(sampledBmp, targetW, targetH, true)
+                if (scaledBmp != sampledBmp) {
+                    sampledBmp.recycle()
+                }
+                scaledBmp
+            } else {
+                sampledBmp
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error decoding background image", e)
+            return null
+        }
+    }
+
     // Standard A4 dimensions in PostScript points (1/72 of an inch)
     /**
      * Renders an interactive Document object and outputs a genuine physical standard PDF file
@@ -22,8 +94,6 @@ object PdfGenerator {
         signatures: List<SignatureProfile>
     ): File? {
         val pdfDocument = PdfDocument()
-        val widthPoints = 595 // A4 Width
-        val heightPoints = 842 // A4 Height
 
         try {
             // Ensure folder exists
@@ -34,9 +104,9 @@ object PdfGenerator {
             val pages = content.pages.ifEmpty { listOf(PageDef("1", 1)) }
 
             for ((index, pageDef) in pages.withIndex()) {
-                // Enforce A4 size at 300 PPI: 2480 x 3508 pixels
-                val curW = 2480
-                val curH = 3508
+                val dimensions = getPageSizePoints(pageDef)
+                val curW = dimensions.first
+                val curH = dimensions.second
 
                 val isRotated90or270 = (pageDef.rotationDegrees % 180 != 0)
                 val finalW = if (isRotated90or270) curH else curW
@@ -60,28 +130,25 @@ object PdfGenerator {
 
                 // 2. Draw standard templates if scan background is missing
                 if (pageDef.backgroundScanPath != null) {
-                    val file = File(pageDef.backgroundScanPath)
-                    if (file.exists()) {
-                        val originalBmp = BitmapFactory.decodeFile(file.absolutePath)
-                        if (originalBmp != null) {
-                            val bitmap = if (pageDef.filterType != "original") {
-                                val filtered = BitmapFilter.applyFilter(originalBmp, pageDef.filterType)
-                                if (filtered != originalBmp) {
-                                    originalBmp.recycle()
-                                }
-                                filtered
-                            } else {
-                                originalBmp
+                    val originalBmp = decodeAndScaleBackground(pageDef.backgroundScanPath, 2480)
+                    if (originalBmp != null) {
+                        val bitmap = if (pageDef.filterType != "original") {
+                            val filtered = BitmapFilter.applyFilter(originalBmp, pageDef.filterType)
+                            if (filtered != originalBmp) {
+                                originalBmp.recycle()
                             }
-                            val rect = RectF(
-                                (finalW - curW) / 2f,
-                                (finalH - curH) / 2f,
-                                (finalW + curW) / 2f,
-                                (finalH + curH) / 2f
-                            )
-                            canvas.drawBitmap(bitmap, null, rect, Paint(Paint.FILTER_BITMAP_FLAG))
-                            bitmap.recycle()
+                            filtered
+                        } else {
+                            originalBmp
                         }
+                        val rect = RectF(
+                            (finalW - curW) / 2f,
+                            (finalH - curH) / 2f,
+                            (finalW + curW) / 2f,
+                            (finalH + curH) / 2f
+                        )
+                        canvas.drawBitmap(bitmap, null, rect, Paint(Paint.FILTER_BITMAP_FLAG))
+                        bitmap.recycle()
                     }
                 } else {
                     // Draw paper template lines
@@ -165,6 +232,9 @@ object PdfGenerator {
 
                 // 4. Draw Text Layer Annotations
                 for (textDef in pageDef.textAnnotations) {
+                    if (textDef.id == "word_main_content" && pageDef.backgroundScanPath != null) {
+                        continue
+                    }
                     val sizeRatio = if (textDef.isPowerOf) 0.72f else 1.0f
                     val textPaint = Paint().apply {
                         color = Color.parseColor(textDef.colorHex)
@@ -194,7 +264,38 @@ object PdfGenerator {
                         isAntiAlias = true
                     }
                     
-                    val lines = textDef.text.split("\n")
+                    val rawLines = textDef.text.split("\n")
+                    val lines = if (textDef.id == "word_main_content") {
+                        val wordWrapList = mutableListOf<String>()
+                        val maxW = curW * 0.84f
+                        for (rawLine in rawLines) {
+                            if (rawLine.trim().isEmpty()) {
+                                wordWrapList.add("")
+                                continue
+                            }
+                            val words = rawLine.split(Regex("\\s+"))
+                            var currentLine = StringBuilder()
+                            for (word in words) {
+                                if (currentLine.isEmpty()) {
+                                    currentLine.append(word)
+                                } else {
+                                    val testLine = currentLine.toString() + " " + word
+                                    if (textPaint.measureText(testLine) <= maxW) {
+                                        currentLine.append(" ").append(word)
+                                    } else {
+                                        wordWrapList.add(currentLine.toString())
+                                        currentLine = StringBuilder(word)
+                                    }
+                                }
+                            }
+                            if (currentLine.isNotEmpty()) {
+                                wordWrapList.add(currentLine.toString())
+                            }
+                        }
+                        wordWrapList
+                    } else {
+                        rawLines
+                    }
                     val fontMetrics = textPaint.fontMetrics
                     val lineHeight = fontMetrics.descent - fontMetrics.ascent
                     val maxLineWidth = lines.map { textPaint.measureText(it) }.maxOrNull() ?: 0f
