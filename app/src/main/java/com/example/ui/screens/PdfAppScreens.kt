@@ -72,6 +72,8 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.layout
@@ -166,6 +168,10 @@ fun ESignStudioTabContent(
     var importAlias by remember { mutableStateOf("") }
     var selectedUriForImport by remember { mutableStateOf<android.net.Uri?>(null) }
 
+    var showCropStudio by remember { mutableStateOf(false) }
+    var uriToCrop by remember { mutableStateOf<android.net.Uri?>(null) }
+    var aliasToCrop by remember { mutableStateOf("") }
+
     val importLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: android.net.Uri? ->
@@ -197,15 +203,16 @@ fun ESignStudioTabContent(
                     onClick = {
                         val uri = selectedUriForImport
                         if (uri != null) {
-                            viewModel.processAndSaveImageSignature(context, uri, importAlias)
-                            viewModel.triggerFeedback("Signature imported successfully!")
+                            uriToCrop = uri
+                            aliasToCrop = importAlias
+                            showCropStudio = true
                         }
                         showImportNamingDialog = false
                         importAlias = ""
                         selectedUriForImport = null
                     }
                 ) {
-                    Text("Import")
+                    Text("Done")
                 }
             },
             dismissButton = {
@@ -218,6 +225,27 @@ fun ESignStudioTabContent(
                 }
             }
         )
+    }
+
+    if (showCropStudio) {
+        val uri = uriToCrop
+        if (uri != null) {
+            CropImageStudioDialog(
+                uri = uri,
+                alias = aliasToCrop,
+                onDismissRequest = {
+                    showCropStudio = false
+                    uriToCrop = null
+                    aliasToCrop = ""
+                },
+                onCropCompleted = { croppedBitmap ->
+                    viewModel.saveCroppedSignature(context, croppedBitmap, aliasToCrop)
+                    showCropStudio = false
+                    uriToCrop = null
+                    aliasToCrop = ""
+                }
+            )
+        }
     }
 
     if (signatureToDelete != null) {
@@ -393,6 +421,8 @@ fun DashboardScreen(
     val selectedFiles = remember { mutableStateListOf<Document>() }
     var searchQuery by remember { mutableStateOf("") }
     var fileToDelete by remember { mutableStateOf<Document?>(null) }
+    var showCombineSourceDialog by remember { mutableStateOf(false) }
+    var showCombineRecentsDialog by remember { mutableStateOf(false) }
 
     val multipleFilePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetMultipleContents()
@@ -698,11 +728,7 @@ fun DashboardScreen(
                         tag = "action_combine",
                         modifier = Modifier.weight(1f),
                         onClick = {
-                            try {
-                                multipleFilePickerLauncher.launch("*/*")
-                            } catch (e: Exception) {
-                                viewModel.triggerFeedback("Failed to launch selector: ${e.localizedMessage}")
-                            }
+                            showCombineSourceDialog = true
                         }
                     )
                 }
@@ -890,6 +916,125 @@ fun DashboardScreen(
                     TextButton(onClick = { fileToDelete = null }) {
                         Text("Cancel")
                     }
+                }
+            )
+        }
+
+        if (showCombineSourceDialog) {
+            AlertDialog(
+                onDismissRequest = { showCombineSourceDialog = false },
+                title = { 
+                    Text(
+                        "Combine Files", 
+                        fontWeight = FontWeight.Bold, 
+                        style = MaterialTheme.typography.titleLarge
+                    ) 
+                },
+                text = {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                    ) {
+                        Text(
+                            text = "Select the source for documents you want to combine:",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        Surface(
+                            onClick = {
+                                showCombineSourceDialog = false
+                                try {
+                                    multipleFilePickerLauncher.launch("*/*")
+                                } catch (e: Exception) {
+                                    viewModel.triggerFeedback("Failed to launch selector: ${e.localizedMessage}")
+                                }
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(16.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CloudUpload,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(32.dp)
+                                )
+                                Spacer(modifier = Modifier.width(16.dp))
+                                Column {
+                                    Text(
+                                        text = "Select Local Files",
+                                        fontWeight = FontWeight.Bold,
+                                        style = MaterialTheme.typography.titleMedium
+                                    )
+                                    Text(
+                                        text = "Select files from your device storage",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+
+                        Surface(
+                            onClick = {
+                                showCombineSourceDialog = false
+                                showCombineRecentsDialog = true
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(16.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.History,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.secondary,
+                                    modifier = Modifier.size(32.dp)
+                                )
+                                Spacer(modifier = Modifier.width(16.dp))
+                                Column {
+                                    Text(
+                                        text = "Choose from Recents",
+                                        fontWeight = FontWeight.Bold,
+                                        style = MaterialTheme.typography.titleMedium
+                                    )
+                                    Text(
+                                        text = "Choose from your saved library history",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { showCombineSourceDialog = false }) {
+                        Text("Cancel", fontWeight = FontWeight.Bold)
+                    }
+                }
+            )
+        }
+
+        if (showCombineRecentsDialog) {
+            RecentsSelectorDialog(
+                documents = state.documents,
+                onDismissRequest = { showCombineRecentsDialog = false },
+                onAddSelected = { added ->
+                    showCombineRecentsDialog = false
+                    viewModel.loadMergeSelection(added)
                 }
             )
         }
@@ -1490,6 +1635,83 @@ fun SignatureStudioScreen(
     val state by viewModel.uiState.collectAsState()
     var aliasText by remember { mutableStateOf(TextFieldValue("")) }
 
+    var showCropNamingDialog by remember { mutableStateOf(false) }
+    var selectedUriForCrop by remember { mutableStateOf<android.net.Uri?>(null) }
+    var cropAlias by remember { mutableStateOf("") }
+    var showCropStudio by remember { mutableStateOf(false) }
+
+    val imageLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: android.net.Uri? ->
+        if (uri != null) {
+            selectedUriForCrop = uri
+            cropAlias = aliasText.text
+            showCropNamingDialog = true
+        }
+    }
+
+    if (showCropNamingDialog) {
+        AlertDialog(
+            onDismissRequest = { showCropNamingDialog = false },
+            title = { Text("Import Photo Signature", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Enter a name/alias for this signature profile:")
+                    OutlinedTextField(
+                        value = cropAlias,
+                        onValueChange = { cropAlias = it },
+                        label = { Text("Signature Title / Holder Name") },
+                        placeholder = { Text("e.g. John Doe - Scan") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val uri = selectedUriForCrop
+                        if (uri != null) {
+                            showCropStudio = true
+                        }
+                        showCropNamingDialog = false
+                    }
+                ) {
+                    Text("Done")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showCropNamingDialog = false
+                    selectedUriForCrop = null
+                }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showCropStudio) {
+        val uri = selectedUriForCrop
+        if (uri != null) {
+            CropImageStudioDialog(
+                uri = uri,
+                alias = cropAlias,
+                onDismissRequest = {
+                    showCropStudio = false
+                    selectedUriForCrop = null
+                    cropAlias = ""
+                },
+                onCropCompleted = { croppedBitmap ->
+                    viewModel.saveCroppedSignature(context, croppedBitmap, cropAlias)
+                    showCropStudio = false
+                    selectedUriForCrop = null
+                    cropAlias = ""
+                }
+            )
+        }
+    }
+
     // Professional drawing state
     val strokes = remember { mutableStateListOf<CanvasStroke>() }
     val redoStrokes = remember { mutableStateListOf<CanvasStroke>() }
@@ -1503,14 +1725,6 @@ fun SignatureStudioScreen(
     var isEraserMode by remember { mutableStateOf(false) }
     var customColorHexInput by remember { mutableStateOf("") }
     var showColorHelpDialog by remember { mutableStateOf(false) }
-
-    val imageLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: android.net.Uri? ->
-        if (uri != null) {
-            viewModel.processAndSaveImageSignature(context, uri, aliasText.text)
-        }
-    }
 
     val colors = listOf(
         Pair("#000000", "Midnight Black"),
@@ -1543,7 +1757,7 @@ fun SignatureStudioScreen(
             TopAppBar(
                 title = {
                     Column {
-                        Text("Signature & Sketch Studio", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        Text("Signature Studio", fontWeight = FontWeight.Bold, fontSize = 18.sp)
                         Text("Vector Canvas & Digital Profiles", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
                     }
                 },
@@ -3985,6 +4199,7 @@ fun EditorScreenRemoved(
     var selectedDrawingId by remember { mutableStateOf<String?>(null) }
     var textStickerDraft by remember { mutableStateOf("") }
     var isAddingTextMode by remember { mutableStateOf(false) }
+    var isOcrRunning by remember { mutableStateOf(false) }
  
     var showPreciseTextPlacementDialog by remember { mutableStateOf(false) }
     var precisePageNumberText by remember { mutableStateOf("") }
@@ -4185,639 +4400,6 @@ fun EditorScreenRemoved(
                     .fillMaxWidth()
                     .background(MaterialTheme.colorScheme.surface)
             ) {
-                // 1. CONTEXTUAL OPTIONS PANEL FOR CURRENTLY ACTIVE TAB
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    tonalElevation = 2.dp,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 10.dp)
-                    ) {
-                        when (activeEditorTab) {
-                            "view" -> {
-                                Column(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Column {
-                                            Text("PREVIEW SETTINGS & DISPLAY", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, letterSpacing = 0.5.sp)
-                                            Text("Manage display viewport settings and continuous flow layouts", fontSize = 10.sp, color = Color.Gray)
-                                        }
-                                        
-                                        Surface(
-                                            color = MaterialTheme.colorScheme.surfaceVariant,
-                                            shape = RoundedCornerShape(4.dp)
-                                        ) {
-                                            Text(
-                                                text = "${pages.size} PAGES DETECTED",
-                                                fontSize = 9.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                            )
-                                        }
-                                    }
-                                    
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        // Single Page focus tab
-                                        FilterChip(
-                                            selected = !isContinuousScrollMode,
-                                            onClick = { isContinuousScrollMode = false },
-                                            label = { Text("Single Page", fontSize = 10.sp, fontWeight = FontWeight.Bold) },
-                                            leadingIcon = {
-                                                Icon(
-                                                    imageVector = Icons.Default.Description,
-                                                    contentDescription = null,
-                                                    modifier = Modifier.size(12.dp)
-                                                )
-                                            },
-                                            shape = RoundedCornerShape(6.dp)
-                                        )
-
-                                        // Continuous flow view tab
-                                        FilterChip(
-                                            selected = isContinuousScrollMode,
-                                            onClick = { isContinuousScrollMode = true },
-                                            label = { Text("Continuous Scroll", fontSize = 10.sp, fontWeight = FontWeight.Bold) },
-                                            leadingIcon = {
-                                                Icon(
-                                                    imageVector = Icons.Default.ViewStream,
-                                                    contentDescription = null,
-                                                    modifier = Modifier.size(12.dp)
-                                                )
-                                            },
-                                            shape = RoundedCornerShape(6.dp)
-                                        )
-
-                                        Spacer(modifier = Modifier.weight(1f))
-
-                                        // Fullscreen Presentation Mode Button
-                                        IconButton(
-                                            onClick = { isPresentationMode = true },
-                                            modifier = Modifier
-                                                .background(MaterialTheme.colorScheme.primaryContainer, CircleShape)
-                                                .size(28.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Fullscreen,
-                                                contentDescription = "Presentation Preview",
-                                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                        }
-
-                                        // Rotate 90
-                                        IconButton(
-                                            onClick = {
-                                                val newRotation = (pageRotationDegrees + 90) % 360
-                                                pageRotationDegrees = newRotation
-                                                viewModel.editActivePageRotation(newRotation)
-                                            },
-                                            modifier = Modifier
-                                                .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape)
-                                                .size(28.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.CropRotate,
-                                                contentDescription = "Rotate 90 degrees",
-                                                tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                        }
-
-                                        // Delete Page
-                                        IconButton(
-                                            onClick = { showDeletePageConfirm = true },
-                                            modifier = Modifier
-                                                .background(MaterialTheme.colorScheme.errorContainer, CircleShape)
-                                                .size(28.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.DeleteForever,
-                                                contentDescription = "Remove page",
-                                                tint = MaterialTheme.colorScheme.onErrorContainer,
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                            "annotate" -> {
-                                Column(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Row(
-                                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text("Tool: ", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                            listOf(
-                                                "brush" to Icons.Default.Gesture,
-                                                "line" to Icons.Default.Remove,
-                                                "box" to Icons.Default.BorderOuter,
-                                                "circle" to Icons.Default.Lens,
-                                                "redact" to Icons.Default.Block,
-                                                "select" to Icons.Default.OpenWith
-                                            ).forEach { (type, icon) ->
-                                                FilledIconButton(
-                                                    onClick = {
-                                                        drawShapeType = type
-                                                        if (type != "select") {
-                                                            selectedDrawingId = null
-                                                        }
-                                                    },
-                                                    modifier = Modifier.size(32.dp),
-                                                    colors = IconButtonDefaults.filledIconButtonColors(
-                                                        containerColor = if (drawShapeType == type) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                                                        contentColor = if (drawShapeType == type) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                                                    )
-                                                ) {
-                                                    Icon(icon, contentDescription = type, modifier = Modifier.size(16.dp))
-                                                }
-                                            }
-                                        }
-
-                                        if (selectedDrawingId != null) {
-                                            Button(
-                                                onClick = {
-                                                    val updated = currentDrawings.filter { it.id != selectedDrawingId }
-                                                    currentDrawings.clear()
-                                                    currentDrawings.addAll(updated)
-                                                    viewModel.editActivePageDrawings(updated)
-                                                    selectedDrawingId = null
-                                                },
-                                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                                                modifier = Modifier.height(28.dp),
-                                                shape = RoundedCornerShape(4.dp)
-                                            ) {
-                                                Icon(Icons.Default.Delete, contentDescription = "Delete Shape", modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onError)
-                                                Spacer(modifier = Modifier.width(4.dp))
-                                                Text("Delete Shape", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onError)
-                                            }
-                                        } else if (drawShapeType == "select") {
-                                            Text("Tap shape to select", fontSize = 10.sp, color = MaterialTheme.colorScheme.primary, fontStyle = FontStyle.Italic)
-                                        } else {
-                                            Text("Drag on canvas to draw", fontSize = 10.sp, color = Color.Gray)
-                                        }
-                                    }
-
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text("Color: ", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        val colors = listOf(
-                                            "#EF4444" to Color(0xFFEF4444),
-                                            "#3B82F6" to Color(0xFF3B82F6),
-                                            "#10B981" to Color(0xFF10B981),
-                                            "#1E293B" to Color(0xFF1E293B),
-                                            "#F59E0B" to Color(0xFFF59E0B),
-                                            "#8B5CF6" to Color(0xFF8B5CF6)
-                                        )
-                                        Row(
-                                            modifier = Modifier.weight(1f),
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                        ) {
-                                            colors.forEach { (hex, col) ->
-                                                Box(
-                                                    modifier = Modifier
-                                                        .size(24.dp)
-                                                        .background(col, CircleShape)
-                                                        .border(
-                                                            width = if (drawColorHex.lowercase() == hex.lowercase()) 2.dp else 1.dp,
-                                                            color = if (drawColorHex.lowercase() == hex.lowercase()) MaterialTheme.colorScheme.onSurface else Color.LightGray.copy(alpha = 0.5f),
-                                                            shape = CircleShape
-                                                        )
-                                                        .clickable {
-                                                            drawColorHex = hex
-                                                            val selId = selectedDrawingId
-                                                            if (selId != null) {
-                                                                val idx = currentDrawings.indexOfFirst { it.id == selId }
-                                                                if (idx != -1) {
-                                                                    val updatedDraw = currentDrawings[idx].copy(colorHex = hex)
-                                                                    currentDrawings[idx] = updatedDraw
-                                                                    viewModel.editActivePageDrawings(currentDrawings.toList())
-                                                                }
-                                                            }
-                                                        }
-                                                )
-                                            }
-                                        }
-
-                                        Row(
-                                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text("Size: ", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                            listOf(3f to "3px", 6f to "6px", 12f to "12px", 24f to "24px").forEach { (sizeVal, name) ->
-                                                Box(
-                                                    modifier = Modifier
-                                                        .background(
-                                                            if (drawStrokeWidth == sizeVal) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else Color.Transparent,
-                                                            RoundedCornerShape(4.dp)
-                                                        )
-                                                        .border(
-                                                            1.dp,
-                                                            if (drawStrokeWidth == sizeVal) MaterialTheme.colorScheme.primary else Color.LightGray,
-                                                            RoundedCornerShape(4.dp)
-                                                        )
-                                                        .clickable {
-                                                            drawStrokeWidth = sizeVal
-                                                            val selId = selectedDrawingId
-                                                            if (selId != null) {
-                                                                val idx = currentDrawings.indexOfFirst { it.id == selId }
-                                                                if (idx != -1) {
-                                                                    val updatedDraw = currentDrawings[idx].copy(strokeWidth = sizeVal)
-                                                                    currentDrawings[idx] = updatedDraw
-                                                                    viewModel.editActivePageDrawings(currentDrawings.toList())
-                                                                }
-                                                            }
-                                                        }
-                                                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                                                ) {
-                                                    Text(name, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            "text" -> {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column {
-                                        Text("Text Annotator Active", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                                        Text("Tap anywhere on the canvas sheet to insert text", fontSize = 10.sp, color = Color.Gray)
-                                    }
-
-                                    Row(
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        // Default text sizes
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(2.dp)
-                                        ) {
-                                            IconButton(
-                                                onClick = { addWordFontSize = (addWordFontSize - 2f).coerceAtLeast(8f) },
-                                                modifier = Modifier.size(24.dp)
-                                            ) {
-                                                Icon(Icons.Default.Remove, "Decrease size", modifier = Modifier.size(14.dp))
-                                            }
-                                            Text("${addWordFontSize.toInt()}sp", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                            IconButton(
-                                                onClick = { addWordFontSize = (addWordFontSize + 2f).coerceIn(8f, 100f) },
-                                                modifier = Modifier.size(24.dp)
-                                            ) {
-                                                Icon(Icons.Default.Add, "Increase size", modifier = Modifier.size(14.dp))
-                                            }
-                                        }
-
-                                        val textPresets = listOf("#000000", "#EF4444", "#3B82F6", "#10B981")
-                                         IconButton(
-                                             onClick = { 
-                                                 precisePageNumberText = "${pages.indexOf(activePage) + 1}"
-                                                 showPreciseTextPlacementDialog = true 
-                                             },
-                                             modifier = Modifier
-                                                 .background(MaterialTheme.colorScheme.primaryContainer, CircleShape)
-                                                 .size(26.dp)
-                                         ) {
-                                             Icon(
-                                                 imageVector = Icons.Default.Place,
-                                                 contentDescription = "Precise Coordinates Placement",
-                                                 tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                                 modifier = Modifier.size(14.dp)
-                                             )
-                                         }
-                                         Spacer(modifier = Modifier.width(4.dp))
-                                        textPresets.forEach { hex ->
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(20.dp)
-                                                    .background(Color(android.graphics.Color.parseColor(hex)), CircleShape)
-                                                    .border(
-                                                        width = if (addWordColorHex.lowercase() == hex.lowercase()) 2.dp else 1.dp,
-                                                        color = if (addWordColorHex.lowercase() == hex.lowercase()) MaterialTheme.colorScheme.onSurface else Color.LightGray,
-                                                        shape = CircleShape
-                                                    )
-                                                    .clickable { addWordColorHex = hex }
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                            "signature" -> {
-                                Column(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text("Saved Signature Profiles", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-                                        
-                                        Button(
-                                            onClick = { viewModel.navigateTo(Screen.Dashboard) },
-                                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
-                                            shape = RoundedCornerShape(6.dp),
-                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                            modifier = Modifier.height(26.dp)
-                                        ) {
-                                            Icon(Icons.Default.Add, null, modifier = Modifier.size(12.dp))
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text("Signature Studio", fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                        }
-                                    }
-
-                                    if (state.signatures.isEmpty()) {
-                                        Text(
-                                            text = "No profiles found. Tap 'Signature Studio' to draw or import one.",
-                                            fontSize = 11.sp,
-                                            color = Color.Gray,
-                                            modifier = Modifier.padding(vertical = 4.dp)
-                                        )
-                                    } else {
-                                        LazyRow(
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                            modifier = Modifier.fillMaxWidth()
-                                        ) {
-                                            items(state.signatures) { sig ->
-                                                Box(
-                                                    modifier = Modifier
-                                                        .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f), RoundedCornerShape(8.dp))
-                                                        .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
-                                                        .clickable {
-                                                            // Instant placement in the visible center of the page
-                                                            val spawnX = (0.5f - (offsetX / (scale * pageMeasuredWidthPx.coerceAtLeast(1f)))).coerceIn(0.05f, 0.85f)
-                                                            val spawnY = (0.5f - (offsetY / (scale * pageMeasuredHeightPx.coerceAtLeast(1f)))).coerceIn(0.05f, 0.85f)
-                                                            
-                                                            var finalWidth = 110f
-                                                            var finalHeight = 55f
-                                                            if (sig.pathDataJson.startsWith("image:")) {
-                                                                try {
-                                                                    val path = sig.pathDataJson.removePrefix("image:")
-                                                                    val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                                                                    android.graphics.BitmapFactory.decodeFile(path, opts)
-                                                                    if (opts.outWidth > 0 && opts.outHeight > 0) {
-                                                                        finalWidth = 110f
-                                                                        finalHeight = finalWidth / (opts.outWidth.toFloat() / opts.outHeight.toFloat())
-                                                                    }
-                                                                } catch (e: Exception) {
-                                                                    e.printStackTrace()
-                                                                }
-                                                            }
-
-                                                            val overlay = SignatureOverlayDef(
-                                                                id = java.util.UUID.randomUUID().toString(),
-                                                                x = spawnX,
-                                                                y = spawnY,
-                                                                width = finalWidth,
-                                                                height = finalHeight,
-                                                                signatureProfileId = sig.id
-                                                            )
-                                                            viewModel.addSignatureOverlay(overlay)
-                                                            activeEditorTab = "view"
-                                                        }
-                                                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                                                ) {
-                                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                                        Icon(Icons.Default.Gesture, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(12.dp))
-                                                        Spacer(modifier = Modifier.width(6.dp))
-                                                        Text(sig.alias, fontWeight = FontWeight.Bold, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface)
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            "filters" -> {
-                                Column(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    Text("Enhance Scanned Document", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        listOf(
-                                            "original" to "Original",
-                                            "black_white" to "B&W Mono",
-                                            "grayscale" to "Grayscale",
-                                            "enhance" to "Enhance Doc"
-                                        ).forEach { (filterType, name) ->
-                                            val isSelected = activePage.filterType == filterType
-                                            FilterChip(
-                                                selected = isSelected,
-                                                onClick = { viewModel.editActivePageFilter(filterType) },
-                                                label = { Text(name, fontSize = 11.sp) },
-                                                leadingIcon = {
-                                                    Icon(
-                                                        imageVector = when (filterType) {
-                                                            "original" -> Icons.Default.Image
-                                                            "black_white" -> Icons.Default.Contrast
-                                                            "grayscale" -> Icons.Default.Lens
-                                                            else -> Icons.Default.AutoAwesome
-                                                        },
-                                                        contentDescription = null,
-                                                        modifier = Modifier.size(14.dp)
-                                                    )
-                                                }
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                            "organize" -> {
-                                Column(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text("Page Manager & Reorder", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-                                        
-                                        Button(
-                                            onClick = { editorFilePickerLauncher.launch("*/*") },
-                                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                                            shape = RoundedCornerShape(6.dp),
-                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                            modifier = Modifier.height(26.dp)
-                                        ) {
-                                            Icon(Icons.Default.AddCircle, null, modifier = Modifier.size(12.dp))
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text("Append Page", fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                        }
-                                    }
-
-                                    LazyRow(
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
-                                    ) {
-                                        itemsIndexed(pages) { index, page ->
-                                            val isActive = page.id == activePage.id
-                                            Column(
-                                                horizontalAlignment = Alignment.CenterHorizontally,
-                                                verticalArrangement = Arrangement.spacedBy(4.dp)
-                                            ) {
-                                                Box(
-                                                    modifier = Modifier
-                                                        .size(width = 75.dp, height = 100.dp)
-                                                        .background(
-                                                            color = if (isActive) MaterialTheme.colorScheme.primaryContainer else Color.White,
-                                                            shape = RoundedCornerShape(6.dp)
-                                                        )
-                                                        .border(
-                                                            border = BorderStroke(
-                                                                width = if (isActive) 2.dp else 1.dp,
-                                                                color = if (isActive) MaterialTheme.colorScheme.primary else Color.LightGray.copy(alpha = 0.6f)
-                                                            ),
-                                                            shape = RoundedCornerShape(6.dp)
-                                                        )
-                                                        .clip(RoundedCornerShape(6.dp))
-                                                        .clickable { viewModel.setActivePageId(page.id) }
-                                                ) {
-                                                    if (page.backgroundScanPath != null && java.io.File(page.backgroundScanPath).exists()) {
-                                                        val bitmap = remember(page.id, page.backgroundScanPath) { AndroidBitmapLoader.load(page.backgroundScanPath) }
-                                                        if (bitmap != null) {
-                                                            Image(
-                                                                bitmap = bitmap.asImageBitmap(),
-                                                                contentDescription = null,
-                                                                modifier = Modifier.fillMaxSize(),
-                                                                contentScale = ContentScale.Crop
-                                                            )
-                                                        }
-                                                    } else {
-                                                        Column(
-                                                            modifier = Modifier
-                                                                .fillMaxSize()
-                                                                .padding(4.dp),
-                                                            horizontalAlignment = Alignment.CenterHorizontally,
-                                                            verticalArrangement = Arrangement.Center
-                                                        ) {
-                                                            Icon(
-                                                                imageVector = Icons.Default.Book,
-                                                                contentDescription = null,
-                                                                tint = MaterialTheme.colorScheme.secondary.copy(alpha = 0.5f),
-                                                                modifier = Modifier.size(18.dp)
-                                                            )
-                                                            Spacer(modifier = Modifier.height(2.dp))
-                                                            Text(
-                                                                text = page.type.uppercase(),
-                                                                fontSize = 8.sp,
-                                                                fontWeight = FontWeight.SemiBold,
-                                                                color = Color.Gray
-                                                            )
-                                                        }
-                                                    }
-                                                    
-                                                    // Badge Page Index Number
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .align(Alignment.TopStart)
-                                                            .padding(4.dp)
-                                                            .background(
-                                                                color = if (isActive) MaterialTheme.colorScheme.primary else Color.Black.copy(alpha = 0.6f),
-                                                                shape = CircleShape
-                                                            )
-                                                            .size(16.dp),
-                                                        contentAlignment = Alignment.Center
-                                                    ) {
-                                                        Text(
-                                                            text = "${index + 1}",
-                                                            color = Color.White,
-                                                            fontSize = 8.sp,
-                                                            fontWeight = FontWeight.Bold
-                                                        )
-                                                    }
-                                                }
-
-                                                // Actions Row: Left, Right, Delete
-                                                Row(
-                                                    horizontalArrangement = Arrangement.spacedBy(2.dp),
-                                                    verticalAlignment = Alignment.CenterVertically
-                                                ) {
-                                                    IconButton(
-                                                        onClick = {
-                                                            if (index > 0) {
-                                                                val mutablePages = pages.toMutableList()
-                                                                val temp = mutablePages[index]
-                                                                mutablePages[index] = mutablePages[index - 1]
-                                                                mutablePages[index - 1] = temp
-                                                                viewModel.reorderActivePages(mutablePages)
-                                                            }
-                                                        },
-                                                        enabled = index > 0,
-                                                        modifier = Modifier.size(20.dp)
-                                                    ) {
-                                                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Move Left", modifier = Modifier.size(11.dp))
-                                                    }
-                                                    
-                                                    IconButton(
-                                                        onClick = {
-                                                            viewModel.removePageFromActiveDocument(page.id)
-                                                        },
-                                                        modifier = Modifier.size(20.dp)
-                                                    ) {
-                                                        Icon(Icons.Default.Delete, "Remove Page", tint = Color.Red.copy(alpha = 0.8f), modifier = Modifier.size(11.dp))
-                                                    }
-                                                    
-                                                    IconButton(
-                                                        onClick = {
-                                                            if (index < pages.size - 1) {
-                                                                val mutablePages = pages.toMutableList()
-                                                                val temp = mutablePages[index]
-                                                                mutablePages[index] = mutablePages[index + 1]
-                                                                mutablePages[index + 1] = temp
-                                                                viewModel.reorderActivePages(mutablePages)
-                                                            }
-                                                        },
-                                                        enabled = index < pages.size - 1,
-                                                        modifier = Modifier.size(20.dp)
-                                                    ) {
-                                                        Icon(Icons.Default.ArrowForward, "Move Right", modifier = Modifier.size(11.dp))
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
                 // 2. MAIN NAVIGATION TAB BAR
                 BottomAppBar(
                     modifier = Modifier.windowInsetsPadding(WindowInsets.navigationBars),
@@ -4914,6 +4496,696 @@ fun EditorScreenRemoved(
                 .padding(padding)
                 .background(Color(0xFF0F172A)) // Premium deep charcoal canvas desk workspace
         ) {
+            // 1. CONTEXTUAL OPTIONS PANEL FOR CURRENTLY ACTIVE TAB
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                tonalElevation = 2.dp,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 10.dp)
+                ) {
+                    when (activeEditorTab) {
+                        "view" -> {
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column {
+                                        Text("PREVIEW SETTINGS & DISPLAY", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, letterSpacing = 0.5.sp)
+                                        Text("Manage display viewport settings and continuous flow layouts", fontSize = 10.sp, color = Color.Gray)
+                                    }
+                                    
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.surfaceVariant,
+                                        shape = RoundedCornerShape(4.dp)
+                                    ) {
+                                        Text(
+                                            text = "${pages.size} PAGES DETECTED",
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                                
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    // Single Page focus tab
+                                    FilterChip(
+                                        selected = !isContinuousScrollMode,
+                                        onClick = { isContinuousScrollMode = false },
+                                        label = { Text("Single Page", fontSize = 10.sp, fontWeight = FontWeight.Bold) },
+                                        leadingIcon = {
+                                            Icon(
+                                                imageVector = Icons.Default.Description,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(12.dp)
+                                            )
+                                        },
+                                        shape = RoundedCornerShape(6.dp)
+                                    )
+
+                                    // Continuous flow view tab
+                                    FilterChip(
+                                        selected = isContinuousScrollMode,
+                                        onClick = { isContinuousScrollMode = true },
+                                        label = { Text("Continuous Scroll", fontSize = 10.sp, fontWeight = FontWeight.Bold) },
+                                        leadingIcon = {
+                                            Icon(
+                                                imageVector = Icons.Default.ViewStream,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(12.dp)
+                                            )
+                                        },
+                                        shape = RoundedCornerShape(6.dp)
+                                    )
+
+                                    Spacer(modifier = Modifier.weight(1f))
+
+                                    // Fullscreen Presentation Mode Button
+                                    IconButton(
+                                        onClick = { isPresentationMode = true },
+                                        modifier = Modifier
+                                            .background(MaterialTheme.colorScheme.primaryContainer, CircleShape)
+                                            .size(28.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Fullscreen,
+                                            contentDescription = "Presentation Preview",
+                                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+
+                                    // Rotate 90
+                                    IconButton(
+                                        onClick = {
+                                            val newRotation = (pageRotationDegrees + 90) % 360
+                                            pageRotationDegrees = newRotation
+                                            viewModel.editActivePageRotation(newRotation)
+                                        },
+                                        modifier = Modifier
+                                            .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape)
+                                            .size(28.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.CropRotate,
+                                            contentDescription = "Rotate 90 degrees",
+                                            tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+
+                                    // Delete Page
+                                    IconButton(
+                                        onClick = { showDeletePageConfirm = true },
+                                        modifier = Modifier
+                                            .background(MaterialTheme.colorScheme.errorContainer, CircleShape)
+                                            .size(28.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.DeleteForever,
+                                            contentDescription = "Remove page",
+                                            tint = MaterialTheme.colorScheme.onErrorContainer,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        "annotate" -> {
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text("Tool: ", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        listOf(
+                                            "brush" to Icons.Default.Gesture,
+                                            "line" to Icons.Default.Remove,
+                                            "box" to Icons.Default.BorderOuter,
+                                            "circle" to Icons.Default.Lens,
+                                            "redact" to Icons.Default.Block,
+                                            "select" to Icons.Default.OpenWith
+                                        ).forEach { (type, icon) ->
+                                            FilledIconButton(
+                                                onClick = {
+                                                    drawShapeType = type
+                                                    if (type != "select") {
+                                                        selectedDrawingId = null
+                                                    }
+                                                },
+                                                modifier = Modifier.size(32.dp),
+                                                colors = IconButtonDefaults.filledIconButtonColors(
+                                                    containerColor = if (drawShapeType == type) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                                    contentColor = if (drawShapeType == type) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            ) {
+                                                Icon(icon, contentDescription = type, modifier = Modifier.size(16.dp))
+                                            }
+                                        }
+                                    }
+
+                                    if (selectedDrawingId != null) {
+                                        Button(
+                                            onClick = {
+                                                val updated = currentDrawings.filter { it.id != selectedDrawingId }
+                                                currentDrawings.clear()
+                                                currentDrawings.addAll(updated)
+                                                viewModel.editActivePageDrawings(updated)
+                                                selectedDrawingId = null
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                            modifier = Modifier.height(28.dp),
+                                            shape = RoundedCornerShape(4.dp)
+                                        ) {
+                                            Icon(Icons.Default.Delete, contentDescription = "Delete Shape", modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onError)
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("Delete Shape", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onError)
+                                        }
+                                    } else if (drawShapeType == "select") {
+                                        Text("Tap shape to select", fontSize = 10.sp, color = MaterialTheme.colorScheme.primary, fontStyle = FontStyle.Italic)
+                                    } else {
+                                        Text("Drag on canvas to draw", fontSize = 10.sp, color = Color.Gray)
+                                    }
+                                }
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("Color: ", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    val colors = listOf(
+                                        "#EF4444" to Color(0xFFEF4444),
+                                        "#3B82F6" to Color(0xFF3B82F6),
+                                        "#10B981" to Color(0xFF10B981),
+                                        "#1E293B" to Color(0xFF1E293B),
+                                        "#F59E0B" to Color(0xFFF59E0B),
+                                        "#8B5CF6" to Color(0xFF8B5CF6)
+                                    )
+                                    Row(
+                                        modifier = Modifier.weight(1f),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        colors.forEach { (hex, col) ->
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(24.dp)
+                                                    .background(col, CircleShape)
+                                                    .border(
+                                                        width = if (drawColorHex.lowercase() == hex.lowercase()) 2.dp else 1.dp,
+                                                        color = if (drawColorHex.lowercase() == hex.lowercase()) MaterialTheme.colorScheme.onSurface else Color.LightGray.copy(alpha = 0.5f),
+                                                        shape = CircleShape
+                                                    )
+                                                    .clickable {
+                                                        drawColorHex = hex
+                                                        val selId = selectedDrawingId
+                                                        if (selId != null) {
+                                                            val idx = currentDrawings.indexOfFirst { it.id == selId }
+                                                            if (idx != -1) {
+                                                                val updatedDraw = currentDrawings[idx].copy(colorHex = hex)
+                                                                currentDrawings[idx] = updatedDraw
+                                                                viewModel.editActivePageDrawings(currentDrawings.toList())
+                                                            }
+                                                        }
+                                                    }
+                                            )
+                                        }
+                                    }
+
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text("Size: ", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        listOf(3f to "3px", 6f to "6px", 12f to "12px", 24f to "24px").forEach { (sizeVal, name) ->
+                                            Box(
+                                                modifier = Modifier
+                                                    .background(
+                                                        if (drawStrokeWidth == sizeVal) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else Color.Transparent,
+                                                        RoundedCornerShape(4.dp)
+                                                    )
+                                                    .border(
+                                                        1.dp,
+                                                        if (drawStrokeWidth == sizeVal) MaterialTheme.colorScheme.primary else Color.LightGray,
+                                                        RoundedCornerShape(4.dp)
+                                                    )
+                                                    .clickable {
+                                                        drawStrokeWidth = sizeVal
+                                                        val selId = selectedDrawingId
+                                                        if (selId != null) {
+                                                            val idx = currentDrawings.indexOfFirst { it.id == selId }
+                                                            if (idx != -1) {
+                                                                val updatedDraw = currentDrawings[idx].copy(strokeWidth = sizeVal)
+                                                                currentDrawings[idx] = updatedDraw
+                                                                viewModel.editActivePageDrawings(currentDrawings.toList())
+                                                            }
+                                                        }
+                                                    }
+                                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                                            ) {
+                                                Text(name, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        "text" -> {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column {
+                                    Text("Text Annotator Active", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                    Text("Click button to insert text", fontSize = 10.sp, color = Color.Gray)
+                                }
+
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                     IconButton(
+                                         onClick = { 
+                                             addWordX = 0.35f
+                                             addWordY = 0.35f
+                                             addWordTextDraft = ""
+                                             showAddWordDialog = true
+                                         },
+                                         modifier = Modifier
+                                             .background(Color(0xFFDBEAFE), CircleShape)
+                                             .size(32.dp)
+                                     ) {
+                                         Icon(
+                                             imageVector = Icons.Default.Add,
+                                             contentDescription = "Place Text Box",
+                                             tint = Color(0xFF2563EB),
+                                             modifier = Modifier.size(18.dp)
+                                         )
+                                     }
+
+                                     IconButton(
+                                         onClick = { 
+                                             coroutineScope.launch {
+                                                 isOcrRunning = true
+                                                 try {
+                                                     val path = activePage.backgroundScanPath
+                                                     if (path != null) {
+                                                         val (detected, cleanedPath) = OcrPdfHelper.ocrAndCleanPageImage(context, path)
+                                                         if (detected.isNotEmpty()) {
+                                                             if (cleanedPath != null) {
+                                                                 viewModel.editActivePageOcrResults(activePage.textAnnotations + detected, cleanedPath)
+                                                             } else {
+                                                                 viewModel.editActivePageAnnotations(activePage.textAnnotations + detected)
+                                                             }
+                                                             android.widget.Toast.makeText(context, "Successfully detected and added ${detected.size} editable words and cleaned background scan!", android.widget.Toast.LENGTH_LONG).show()
+                                                         } else {
+                                                             android.widget.Toast.makeText(context, "No text detected on this scanned page.", android.widget.Toast.LENGTH_SHORT).show()
+                                                         }
+                                                     } else {
+                                                         android.widget.Toast.makeText(context, "No background image/scan found on this page to perform OCR.", android.widget.Toast.LENGTH_LONG).show()
+                                                     }
+                                                 } catch (e: Exception) {
+                                                     android.widget.Toast.makeText(context, "OCR Error: ${e.localizedMessage}", android.widget.Toast.LENGTH_SHORT).show()
+                                                 } finally {
+                                                     isOcrRunning = false
+                                                 }
+                                             }
+                                         },
+                                         enabled = !isOcrRunning,
+                                         modifier = Modifier
+                                             .background(if (isOcrRunning) Color.LightGray else Color(0xFFE0F2FE), CircleShape)
+                                             .size(32.dp)
+                                     ) {
+                                         if (isOcrRunning) {
+                                             CircularProgressIndicator(
+                                                 modifier = Modifier.size(16.dp),
+                                                 strokeWidth = 2.dp,
+                                                 color = Color(0xFF0369A1)
+                                             )
+                                         } else {
+                                             Icon(
+                                                 imageVector = Icons.Default.DocumentScanner,
+                                                 contentDescription = "OCR Editable Scan",
+                                                 tint = Color(0xFF0369A1),
+                                                 modifier = Modifier.size(18.dp)
+                                             )
+                                         }
+                                     }
+
+                                     val selectedAnn = currentTextAnns.find { it.id == selectedAnnotationId }
+                                     Button(
+                                         onClick = { 
+                                             if (selectedAnn != null) {
+                                                 selectedWordToEdit = selectedAnn
+                                                 editWordTextDraft = selectedAnn.text
+                                                 editWordFontSize = selectedAnn.fontSize
+                                                 editWordColorHex = selectedAnn.colorHex
+                                                 editWordFontFamily = selectedAnn.fontName
+                                                 editWordBgColorHex = selectedAnn.bgColorHex
+                                                 editWordHasOutline = selectedAnn.hasOutline
+                                                 editWordHasUnderline = selectedAnn.hasUnderline
+                                                 editWordOutlineColorHex = selectedAnn.outlineColorHex
+                                                 editWordIsBold = selectedAnn.isBold
+                                                 editWordAlignment = selectedAnn.alignment
+                                                 editWordIsPowerOf = selectedAnn.isPowerOf
+                                                 editWordIsItalic = selectedAnn.isItalic
+                                                 editWordHasStrikeThrough = selectedAnn.hasStrikeThrough
+                                                 showEditWordDialog = true
+                                             }
+                                         },
+                                         enabled = selectedAnn != null,
+                                         shape = RoundedCornerShape(16.dp),
+                                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                         colors = ButtonDefaults.buttonColors(
+                                             containerColor = if (selectedAnn != null) Color(0xFF2563EB) else Color.Transparent,
+                                             contentColor = if (selectedAnn != null) Color.White else Color.Gray,
+                                             disabledContainerColor = Color.Transparent,
+                                             disabledContentColor = Color.Gray
+                                         ),
+                                         modifier = Modifier.height(32.dp)
+                                     ) {
+                                         Icon(
+                                             imageVector = Icons.Default.Edit,
+                                             contentDescription = "Edit Word",
+                                             modifier = Modifier.size(16.dp)
+                                         )
+                                         Spacer(modifier = Modifier.width(4.dp))
+                                         Text("Edit Word", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                     }
+                                }
+                            }
+                        }
+                        "signature" -> {
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("Saved Signature Profiles", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                                    
+                                    Button(
+                                        onClick = { viewModel.navigateTo(Screen.SignatureStudio) },
+                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+                                        shape = RoundedCornerShape(6.dp),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                        modifier = Modifier.height(26.dp)
+                                    ) {
+                                        Icon(Icons.Default.Add, null, modifier = Modifier.size(12.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Signature Studio", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+
+                                if (state.signatures.isEmpty()) {
+                                    Text(
+                                        text = "No profiles found. Tap 'Signature Studio' to draw or import one.",
+                                        fontSize = 11.sp,
+                                        color = Color.Gray,
+                                        modifier = Modifier.padding(vertical = 4.dp)
+                                    )
+                                } else {
+                                    LazyRow(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        items(state.signatures) { sig ->
+                                            Box(
+                                                modifier = Modifier
+                                                    .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f), RoundedCornerShape(8.dp))
+                                                    .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                                                    .clickable {
+                                                        // Instant placement in the visible center of the page
+                                                        val spawnX = (0.5f - (offsetX / (scale * pageMeasuredWidthPx.coerceAtLeast(1f)))).coerceIn(0.05f, 0.85f)
+                                                        val spawnY = (0.5f - (offsetY / (scale * pageMeasuredHeightPx.coerceAtLeast(1f)))).coerceIn(0.05f, 0.85f)
+                                                        
+                                                        var finalWidth = 110f
+                                                        var finalHeight = 55f
+                                                        if (sig.pathDataJson.startsWith("image:")) {
+                                                            try {
+                                                                val path = sig.pathDataJson.removePrefix("image:")
+                                                                val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                                                                android.graphics.BitmapFactory.decodeFile(path, opts)
+                                                                if (opts.outWidth > 0 && opts.outHeight > 0) {
+                                                                    finalWidth = 110f
+                                                                    finalHeight = finalWidth / (opts.outWidth.toFloat() / opts.outHeight.toFloat())
+                                                                }
+                                                            } catch (e: Exception) {
+                                                                e.printStackTrace()
+                                                            }
+                                                        }
+
+                                                        val overlay = SignatureOverlayDef(
+                                                            id = java.util.UUID.randomUUID().toString(),
+                                                            x = spawnX,
+                                                            y = spawnY,
+                                                            width = finalWidth,
+                                                            height = finalHeight,
+                                                            signatureProfileId = sig.id
+                                                        )
+                                                        viewModel.addSignatureOverlay(overlay)
+                                                        activeEditorTab = "view"
+                                                    }
+                                                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                                            ) {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Icon(Icons.Default.Gesture, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(12.dp))
+                                                    Spacer(modifier = Modifier.width(6.dp))
+                                                    Text(sig.alias, fontWeight = FontWeight.Bold, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        "filters" -> {
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text("Enhance Scanned Document", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    listOf(
+                                        "original" to "Original",
+                                        "black_white" to "B&W Mono",
+                                        "grayscale" to "Grayscale",
+                                        "enhance" to "Enhance Doc"
+                                    ).forEach { (filterType, name) ->
+                                        val isSelected = activePage.filterType == filterType
+                                        FilterChip(
+                                            selected = isSelected,
+                                            onClick = { viewModel.editActivePageFilter(filterType) },
+                                            label = { Text(name, fontSize = 11.sp) },
+                                            leadingIcon = {
+                                                Icon(
+                                                    imageVector = when (filterType) {
+                                                        "original" -> Icons.Default.Image
+                                                        "black_white" -> Icons.Default.Contrast
+                                                        "grayscale" -> Icons.Default.Lens
+                                                        else -> Icons.Default.AutoAwesome
+                                                    },
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        "organize" -> {
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("Page Manager & Reorder", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                                    
+                                    Button(
+                                        onClick = { editorFilePickerLauncher.launch("*/*") },
+                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                                        shape = RoundedCornerShape(6.dp),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                        modifier = Modifier.height(26.dp)
+                                    ) {
+                                        Icon(Icons.Default.AddCircle, null, modifier = Modifier.size(12.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Append Page", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+
+                                LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                                ) {
+                                    itemsIndexed(pages) { index, page ->
+                                        val isActive = page.id == activePage.id
+                                        Column(
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(width = 75.dp, height = 100.dp)
+                                                    .background(
+                                                        color = if (isActive) MaterialTheme.colorScheme.primaryContainer else Color.White,
+                                                        shape = RoundedCornerShape(6.dp)
+                                                    )
+                                                    .border(
+                                                        border = BorderStroke(
+                                                            width = if (isActive) 2.dp else 1.dp,
+                                                            color = if (isActive) MaterialTheme.colorScheme.primary else Color.LightGray.copy(alpha = 0.6f)
+                                                        ),
+                                                        shape = RoundedCornerShape(6.dp)
+                                                    )
+                                                    .clip(RoundedCornerShape(6.dp))
+                                                    .clickable { viewModel.setActivePageId(page.id) }
+                                            ) {
+                                                if (page.backgroundScanPath != null && java.io.File(page.backgroundScanPath).exists()) {
+                                                    val bitmap = remember(page.id, page.backgroundScanPath) { AndroidBitmapLoader.load(page.backgroundScanPath) }
+                                                    if (bitmap != null) {
+                                                        Image(
+                                                            bitmap = bitmap.asImageBitmap(),
+                                                            contentDescription = null,
+                                                            modifier = Modifier.fillMaxSize(),
+                                                            contentScale = ContentScale.Crop
+                                                        )
+                                                    }
+                                                } else {
+                                                    Column(
+                                                        modifier = Modifier
+                                                            .fillMaxSize()
+                                                            .padding(4.dp),
+                                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                                        verticalArrangement = Arrangement.Center
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = Icons.Default.Book,
+                                                            contentDescription = null,
+                                                            tint = MaterialTheme.colorScheme.secondary.copy(alpha = 0.5f),
+                                                            modifier = Modifier.size(18.dp)
+                                                        )
+                                                        Spacer(modifier = Modifier.height(2.dp))
+                                                        Text(
+                                                            text = page.type.uppercase(),
+                                                            fontSize = 8.sp,
+                                                            fontWeight = FontWeight.SemiBold,
+                                                            color = Color.Gray
+                                                        )
+                                                    }
+                                                }
+                                                
+                                                // Badge Page Index Number
+                                                Box(
+                                                    modifier = Modifier
+                                                        .align(Alignment.TopStart)
+                                                        .padding(4.dp)
+                                                        .background(
+                                                            color = if (isActive) MaterialTheme.colorScheme.primary else Color.Black.copy(alpha = 0.6f),
+                                                            shape = CircleShape
+                                                        )
+                                                        .size(16.dp),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Text(
+                                                        text = "${index + 1}",
+                                                        color = Color.White,
+                                                        fontSize = 8.sp,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
+                                            }
+
+                                            // Actions Row: Left, Right, Delete
+                                            Row(
+                                                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                IconButton(
+                                                    onClick = {
+                                                        if (index > 0) {
+                                                            val mutablePages = pages.toMutableList()
+                                                            val temp = mutablePages[index]
+                                                            mutablePages[index] = mutablePages[index - 1]
+                                                            mutablePages[index - 1] = temp
+                                                            viewModel.reorderActivePages(mutablePages)
+                                                        }
+                                                    },
+                                                    enabled = index > 0,
+                                                    modifier = Modifier.size(20.dp)
+                                                ) {
+                                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Move Left", modifier = Modifier.size(11.dp))
+                                                }
+                                                
+                                                IconButton(
+                                                    onClick = {
+                                                        viewModel.removePageFromActiveDocument(page.id)
+                                                    },
+                                                    modifier = Modifier.size(20.dp)
+                                                ) {
+                                                    Icon(Icons.Default.Delete, "Remove Page", tint = Color.Red.copy(alpha = 0.8f), modifier = Modifier.size(11.dp))
+                                                }
+                                                
+                                                IconButton(
+                                                    onClick = {
+                                                        if (index < pages.size - 1) {
+                                                            val mutablePages = pages.toMutableList()
+                                                            val temp = mutablePages[index]
+                                                            mutablePages[index] = mutablePages[index + 1]
+                                                            mutablePages[index + 1] = temp
+                                                            viewModel.reorderActivePages(mutablePages)
+                                                        }
+                                                    },
+                                                    enabled = index < pages.size - 1,
+                                                    modifier = Modifier.size(20.dp)
+                                                ) {
+                                                    Icon(Icons.Default.ArrowForward, "Move Right", modifier = Modifier.size(11.dp))
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // ---------------- PAGE WORKBENCH PANEL ----------------
             if (showPageWorkbench) {
                 Card(
@@ -5365,13 +5637,8 @@ fun EditorScreenRemoved(
                                         )
                                     }
                                 } else if (isAddingTextMode) {
-                                    detectTapGestures { offset ->
-                                        val rx = offset.x / size.width
-                                        val ry = offset.y / size.height
-                                        addWordX = rx
-                                        addWordY = ry
-                                        addWordTextDraft = ""
-                                        showAddWordDialog = true
+                                    detectTapGestures {
+                                        selectedAnnotationId = null
                                     }
                                 } else {
                                     detectTapGestures {
@@ -7762,6 +8029,7 @@ fun MergerScreen(
     var masterTitle by remember { mutableStateOf("") }
     val selectedDraftDocs = remember { mutableStateListOf<Document>().apply { addAll(state.mergerSelectedDocs) } }
     val context = LocalContext.current
+    var showRecentsDialog by remember { mutableStateOf(false) }
 
     val allCombinedPages = remember(selectedDraftDocs.toList()) {
         val list = mutableListOf<Pair<String, PageDef>>()
@@ -7804,6 +8072,13 @@ fun MergerScreen(
                     }
                 },
                 actions = {
+                    IconButton(
+                        onClick = {
+                            showRecentsDialog = true
+                        }
+                    ) {
+                        Icon(Icons.Default.History, "Choose from Recents")
+                    }
                     IconButton(
                         onClick = {
                             multiFilePickerLauncher.launch("*/*")
@@ -7968,15 +8243,30 @@ fun MergerScreen(
                             color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.82f)
                         )
                         Spacer(modifier = Modifier.height(16.dp))
-                        Button(
-                            onClick = {
-                                multiFilePickerLauncher.launch("*/*")
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            Icon(Icons.Default.CloudUpload, contentDescription = "Upload files")
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Select Local Files")
+                            Button(
+                                onClick = {
+                                    multiFilePickerLauncher.launch("*/*")
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                            ) {
+                                Icon(Icons.Default.CloudUpload, contentDescription = "Upload files")
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Select Local Files")
+                            }
+
+                            Button(
+                                onClick = {
+                                    showRecentsDialog = true
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                            ) {
+                                Icon(Icons.Default.History, contentDescription = "Recent files")
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Choose from Recents")
+                            }
                         }
                     }
                 }
@@ -8076,6 +8366,153 @@ fun MergerScreen(
             }
         }
     }
+
+    if (showRecentsDialog) {
+        RecentsSelectorDialog(
+            documents = state.documents,
+            onDismissRequest = { showRecentsDialog = false },
+            onAddSelected = { added ->
+                selectedDraftDocs.addAll(added)
+                showRecentsDialog = false
+            }
+        )
+    }
+}
+
+@Composable
+fun RecentsSelectorDialog(
+    documents: List<Document>,
+    onDismissRequest: () -> Unit,
+    onAddSelected: (List<Document>) -> Unit
+) {
+    val selectedDocs = remember { mutableStateListOf<Document>() }
+
+    AlertDialog(
+        onDismissRequest = onDismissRequest,
+        title = {
+            Text(
+                text = "Select Documents from Recents",
+                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.titleMedium
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 400.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "Choose one or more documents saved in your recents library to combine:",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                
+                Spacer(modifier = Modifier.height(4.dp))
+
+                val savedDocs = remember(documents) { documents.filter { it.isSaved } }
+
+                if (savedDocs.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 32.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "No saved documents in Recents.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(savedDocs) { doc ->
+                            val isChecked = selectedDocs.contains(doc)
+                            Surface(
+                                onClick = {
+                                    if (isChecked) {
+                                        selectedDocs.remove(doc)
+                                    } else {
+                                        selectedDocs.add(doc)
+                                    }
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isChecked) {
+                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+                                } else {
+                                    Color.Transparent
+                                },
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (isChecked) MaterialTheme.colorScheme.primary else Color.LightGray.copy(alpha = 0.4f)
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.PictureAsPdf,
+                                        contentDescription = null,
+                                        tint = if (doc.category == "PDF" || doc.category == "Combined PDF") Color.Red else MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(28.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = doc.title,
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 13.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = "${doc.pageCount} pages • ${doc.category}",
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                        )
+                                    }
+                                    Checkbox(
+                                        checked = isChecked,
+                                        onCheckedChange = { checked ->
+                                            if (checked) {
+                                                selectedDocs.add(doc)
+                                            } else {
+                                                selectedDocs.remove(doc)
+                                            }
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    onAddSelected(selectedDocs.toList())
+                },
+                enabled = selectedDocs.isNotEmpty()
+            ) {
+                Text("Add Selected (${selectedDocs.size})")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismissRequest) {
+                Text("Cancel")
+            }
+        }
+    )
 }
 
 // —-- MOCK ASSET CREATORS (CAMERA IMAGES FALLBACKS FOR TESTING STABILITY) —--
@@ -9158,6 +9595,334 @@ fun StaticPagePreview(
                                 }
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CropImageStudioDialog(
+    uri: android.net.Uri,
+    alias: String,
+    onDismissRequest: () -> Unit,
+    onCropCompleted: (Bitmap) -> Unit
+) {
+    val context = LocalContext.current
+    var bitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var isLoading by remember { mutableStateOf(true) }
+
+    LaunchedEffect(uri) {
+        isLoading = true
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val inputStream = context.contentResolver.openInputStream(uri)
+                val b = BitmapFactory.decodeStream(inputStream)
+                inputStream?.close()
+                bitmap = b
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
+                isLoading = false
+            }
+        }
+    }
+
+    Dialog(
+        onDismissRequest = onDismissRequest,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            dismissOnBackPress = true,
+            dismissOnClickOutside = false
+        )
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = Color(0xFF0F172A)
+        ) {
+            var scale by remember { mutableFloatStateOf(1f) }
+            var rotationAngle by remember { mutableFloatStateOf(0f) }
+            var translateX by remember { mutableFloatStateOf(0f) }
+            var translateY by remember { mutableFloatStateOf(0f) }
+
+            Scaffold(
+                topBar = {
+                    TopAppBar(
+                        title = { Text("Crop Image Studio", color = Color.White, style = MaterialTheme.typography.titleMedium) },
+                        navigationIcon = {
+                            IconButton(onClick = onDismissRequest) {
+                                Icon(Icons.Default.Close, contentDescription = "Cancel", tint = Color.White)
+                            }
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = Color(0xFF1E293B),
+                            titleContentColor = Color.White,
+                            navigationIconContentColor = Color.White
+                        )
+                    )
+                },
+                containerColor = Color(0xFF0F172A)
+            ) { paddingValues ->
+                if (isLoading) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(paddingValues),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                    }
+                } else if (bitmap == null) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(paddingValues),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(Icons.Default.ErrorOutline, contentDescription = null, tint = Color.Red, modifier = Modifier.size(48.dp))
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text("Failed to load selected photo", color = Color.White)
+                        }
+                    }
+                } else {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(paddingValues)
+                            .verticalScroll(rememberScrollState())
+                            .padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Text(
+                            text = "Crop and Position your Signature inside the white box. Drag to pan, pinch to zoom.",
+                            color = Color.White.copy(alpha = 0.8f),
+                            style = MaterialTheme.typography.bodyMedium,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(horizontal = 12.dp)
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Viewport Box
+                        Box(
+                            modifier = Modifier
+                                .size(320.dp, 180.dp)
+                                .shadow(8.dp, RoundedCornerShape(8.dp))
+                                .border(2.dp, Color.White.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color.White)
+                                .pointerInput(Unit) {
+                                    detectTransformGestures { _, pan, zoom, rotation ->
+                                        scale = (scale * zoom).coerceIn(0.1f, 15f)
+                                        rotationAngle += rotation
+                                        translateX += pan.x
+                                        translateY += pan.y
+                                    }
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Canvas(modifier = Modifier.fillMaxSize()) {
+                                if (bitmap != null) {
+                                    drawIntoCanvas { canvas ->
+                                        val nativeBmpCanvas = canvas.nativeCanvas
+                                        nativeBmpCanvas.save()
+                                        
+                                        val centerX = size.width / 2f
+                                        val centerY = size.height / 2f
+                                        
+                                        nativeBmpCanvas.translate(centerX + translateX, centerY + translateY)
+                                        nativeBmpCanvas.scale(scale, scale)
+                                        nativeBmpCanvas.rotate(rotationAngle)
+                                        
+                                        val bmpW = bitmap!!.width.toFloat()
+                                        val bmpH = bitmap!!.height.toFloat()
+                                        
+                                        nativeBmpCanvas.drawBitmap(
+                                            bitmap!!,
+                                            -bmpW / 2f,
+                                            -bmpH / 2f,
+                                            AndroidPaint().apply {
+                                                isFilterBitmap = true
+                                            }
+                                        )
+                                        nativeBmpCanvas.restore()
+                                    }
+                                }
+                            }
+                            
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .drawBehind {
+                                        val dashPathEffect = android.graphics.DashPathEffect(floatArrayOf(10f, 10f), 0f)
+                                        val paint = AndroidPaint().apply {
+                                            color = android.graphics.Color.BLUE
+                                            alpha = 40
+                                            style = android.graphics.Paint.Style.STROKE
+                                            strokeWidth = 2f
+                                            pathEffect = dashPathEffect
+                                        }
+                                        drawContext.canvas.nativeCanvas.drawLine(size.width / 2f, 0f, size.width / 2f, size.height, paint)
+                                        drawContext.canvas.nativeCanvas.drawLine(0f, size.height / 2f, size.width, size.height / 2f, paint)
+                                    }
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Text(
+                            text = "Fine Adjustments & Presets",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceEvenly
+                        ) {
+                            OutlinedButton(
+                                onClick = { rotationAngle = (rotationAngle + 90f) % 360f },
+                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.2f)),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+                            ) {
+                                Icon(Icons.Default.RotateRight, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Rotate 90°", fontSize = 11.sp)
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    scale = 1f
+                                    rotationAngle = 0f
+                                    translateX = 0f
+                                    translateY = 0f
+                                },
+                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.2f)),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+                            ) {
+                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Reset", fontSize = 11.sp)
+                            }
+                        }
+
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Zoom: ${String.format("%.1fx", scale)}", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    IconButton(
+                                        onClick = { scale = (scale - 0.15f).coerceAtLeast(0.1f) },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(Icons.Default.ZoomOut, contentDescription = "Zoom Out", tint = Color.White, modifier = Modifier.size(16.dp))
+                                    }
+                                    IconButton(
+                                        onClick = { scale = (scale + 0.15f).coerceAtMost(15f) },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(Icons.Default.ZoomIn, contentDescription = "Zoom In", tint = Color.White, modifier = Modifier.size(16.dp))
+                                    }
+                                }
+                            }
+                            Slider(
+                                value = scale,
+                                onValueChange = { scale = it },
+                                valueRange = 0.1f..10f,
+                                colors = SliderDefaults.colors(
+                                    thumbColor = MaterialTheme.colorScheme.primary,
+                                    activeTrackColor = MaterialTheme.colorScheme.primary,
+                                    inactiveTrackColor = Color.White.copy(alpha = 0.2f)
+                                )
+                            )
+                        }
+
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Text(
+                                text = "Rotation Angle: ${rotationAngle.roundToInt()}°",
+                                color = Color.White.copy(alpha = 0.8f),
+                                fontSize = 12.sp
+                            )
+                            Slider(
+                                value = rotationAngle,
+                                onValueChange = { rotationAngle = it },
+                                valueRange = -180f..180f,
+                                colors = SliderDefaults.colors(
+                                    thumbColor = MaterialTheme.colorScheme.primary,
+                                    activeTrackColor = MaterialTheme.colorScheme.primary,
+                                    inactiveTrackColor = Color.White.copy(alpha = 0.2f)
+                                )
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(24.dp))
+
+                        Button(
+                            onClick = {
+                                val currentBmp = bitmap
+                                if (currentBmp != null) {
+                                    val density = context.resources.displayMetrics.density
+                                    val viewportWidthPx = (320 * density).toInt()
+                                    val viewportHeightPx = (180 * density).toInt()
+
+                                    val croppedBitmap = Bitmap.createBitmap(
+                                        viewportWidthPx,
+                                        viewportHeightPx,
+                                        Bitmap.Config.ARGB_8888
+                                    )
+                                    val canvas = AndroidCanvas(croppedBitmap)
+
+                                    canvas.drawColor(android.graphics.Color.WHITE)
+
+                                    val centerX = viewportWidthPx / 2f
+                                    val centerY = viewportHeightPx / 2f
+
+                                    canvas.save()
+                                    canvas.translate(centerX + translateX, centerY + translateY)
+                                    canvas.scale(scale, scale)
+                                    canvas.rotate(rotationAngle)
+
+                                    val bmpW = currentBmp.width.toFloat()
+                                    val bmpH = currentBmp.height.toFloat()
+
+                                    val paint = AndroidPaint().apply {
+                                        isFilterBitmap = true
+                                    }
+                                    canvas.drawBitmap(
+                                        currentBmp,
+                                        -bmpW / 2f,
+                                        -bmpH / 2f,
+                                        paint
+                                    )
+                                    canvas.restore()
+
+                                    onCropCompleted(croppedBitmap)
+                                }
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(52.dp)
+                                .testTag("complete_crop_button"),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            enabled = bitmap != null && !isLoading
+                        ) {
+                            Icon(Icons.Default.Check, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Complete Crop & Save Signature", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        }
+
+                        Spacer(modifier = Modifier.height(24.dp))
                     }
                 }
             }

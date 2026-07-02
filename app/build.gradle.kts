@@ -99,6 +99,8 @@ dependencies {
   implementation(libs.moshi.kotlin)
   implementation(libs.okhttp)
   implementation(libs.play.services.mlkit.document.scanner)
+  implementation(libs.mlkit.text.recognition)
+  implementation("com.tom-roush:pdfbox-android:2.0.27.0")
   // implementation(libs.play.services.location)
   implementation(libs.retrofit)
   testImplementation(libs.androidx.compose.ui.test.junit4)

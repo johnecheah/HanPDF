@@ -946,6 +946,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun editActivePageOcrResults(annotations: List<TextAnnotationDef>, cleanedBackgroundPath: String) {
+        pushToUndoStack()
+        val currentContent = _uiState.value.activeDocumentContent
+        val activePageId = _uiState.value.activePageId
+        
+        val updatedPages = currentContent.pages.map { page ->
+            if (page.id == activePageId) {
+                page.copy(
+                    textAnnotations = annotations,
+                    backgroundScanPath = cleanedBackgroundPath
+                )
+            } else {
+                page
+            }
+        }
+        
+        _uiState.update {
+            it.copy(activeDocumentContent = currentContent.copy(pages = updatedPages))
+        }
+    }
+
     fun editPageAnnotations(pageId: String, annotations: List<TextAnnotationDef>) {
         pushToUndoStack()
         val currentContent = _uiState.value.activeDocumentContent
@@ -1581,6 +1602,41 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } catch (e: Exception) {
                 e.printStackTrace()
                 triggerFeedback("Error importing signature: ${e.localizedMessage}")
+            }
+        }
+    }
+
+    fun saveCroppedSignature(context: android.content.Context, croppedBitmap: android.graphics.Bitmap, aliasDraft: String) {
+        viewModelScope.launch {
+            try {
+                // Process bitmap sequentially in background coroutine to keep UI smooth
+                val processedBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    removeSignatureBackground(croppedBitmap)
+                }
+
+                val file = File(context.filesDir, "signature_img_${System.currentTimeMillis()}.png")
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    val out = FileOutputStream(file)
+                    processedBitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+                    out.flush()
+                    out.close()
+                }
+
+                val alias = if (aliasDraft.isBlank()) "Imported Sign - ${System.currentTimeMillis() % 1000}" else aliasDraft
+                val pathDataJson = "image:${file.absolutePath}"
+
+                val signature = SignatureProfile(
+                    alias = alias,
+                    pathDataJson = pathDataJson,
+                    colorHex = "#000000",
+                    strokeWidth = 6f
+                )
+
+                repo.insertSignature(signature)
+                triggerFeedback("Cropped signature imported & background auto-deleted successfully!")
+            } catch (e: Exception) {
+                e.printStackTrace()
+                triggerFeedback("Error saving cropped signature: ${e.localizedMessage}")
             }
         }
     }
