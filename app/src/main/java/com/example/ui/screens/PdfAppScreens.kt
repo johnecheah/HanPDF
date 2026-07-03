@@ -6140,15 +6140,12 @@ fun EditorScreenRemoved(
                     },
                     modifier = Modifier.fillMaxSize(),
                     update = { frameLayout ->
-                        // Synchronize child views
                         val currentIds = textAnnsToRender.map { it.id }.toSet()
                         val toRemove = mutableListOf<android.view.View>()
                         for (i in 0 until frameLayout.childCount) {
                             val child = frameLayout.getChildAt(i)
                             val tagId = child.tag as? String
-                            if (tagId == null || !currentIds.contains(tagId)) {
-                                toRemove.add(child)
-                            }
+                            if (tagId == null || !currentIds.contains(tagId)) toRemove.add(child)
                         }
                         toRemove.forEach { frameLayout.removeView(it) }
 
@@ -6165,54 +6162,26 @@ fun EditorScreenRemoved(
                                 frameLayout.addView(this, lp)
                             }
 
-                            // Set visual properties and callbacks
-                            val scaleFactor = (pageMeasuredWidthPx / 400f).coerceAtLeast(0.1f)
-                            val props = AdvancedTextAnnotationView.AnnotationProperties(
-                                id = txtAnn.id,
-                                text = txtAnn.text,
-                                x = txtAnn.x * pageMeasuredWidthPx,
-                                y = txtAnn.y * pageMeasuredHeightPx,
-                                fontSize = txtAnn.fontSize * scaleFactor,
-                                textColorHex = txtAnn.colorHex,
-                                bgColorHex = txtAnn.bgColorHex,
-                                fontName = txtAnn.fontName,
-                                isBold = txtAnn.isBold,
-                                isItalic = txtAnn.isItalic,
-                                hasUnderline = txtAnn.hasUnderline,
-                                hasStrikeThrough = txtAnn.hasStrikeThrough,
-                                hasOutline = txtAnn.hasOutline,
-                                outlineColorHex = txtAnn.outlineColorHex,
-                                alignment = txtAnn.alignment
-                            )
-                            view.setProperties(props)
+                            view.zoomScale = scale
+                            if (!view.isEditing) {
+                                view.bind(txtAnn, pageMeasuredWidthPx, pageMeasuredHeightPx)
+                            } else {
+                                view.refWidthPx = pageMeasuredWidthPx
+                                view.refHeightPx = pageMeasuredHeightPx
+                            }
                             view.isSelectedState = isSelected
 
-                            view.onSelected = {
-                                selectedAnnotationId = txtAnn.id
-                            }
+                            view.onSelected = { selectedAnnotationId = txtAnn.id }
 
                             view.onDeleteRequested = {
                                 val idxLocal = currentTextAnns.indexOfFirst { it.id == txtAnn.id }
-                                if (idxLocal != -1) {
-                                    currentTextAnns.removeAt(idxLocal)
-                                }
+                                if (idxLocal != -1) currentTextAnns.removeAt(idxLocal)
                                 viewModel.editActivePageAnnotations(currentTextAnns.toList())
                                 selectedAnnotationId = null
                             }
 
-                            view.onPropertiesChanged = { updatedProps ->
-                                val newX = (updatedProps.x / pageMeasuredWidthPx).coerceIn(0f, 0.99f)
-                                val newY = (updatedProps.y / pageMeasuredHeightPx).coerceIn(0f, 0.99f)
-                                val updatedList = currentTextAnns.map {
-                                    if (it.id == txtAnn.id) {
-                                        it.copy(
-                                            x = newX,
-                                            y = newY,
-                                            text = updatedProps.text,
-                                            fontSize = updatedProps.fontSize / scaleFactor
-                                        )
-                                    } else it
-                                }
+                            view.onDefChanged = { updatedDef ->
+                                val updatedList = currentTextAnns.map { if (it.id == txtAnn.id) updatedDef else it }
                                 viewModel.editActivePageAnnotations(updatedList)
                             }
                         }
