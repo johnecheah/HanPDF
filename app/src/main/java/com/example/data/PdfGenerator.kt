@@ -207,6 +207,25 @@ object PdfGenerator {
                             val bottom = maxOf(start.y, end.y) * curH
                             canvas.drawRect(left, top, right, bottom, drawPaint)
                         }
+                        "filled_box" -> {
+                            val start = draw.points.first()
+                            val end = draw.points.last()
+                            val left = minOf(start.x, end.x) * curW
+                            val top = minOf(start.y, end.y) * curH
+                            val right = maxOf(start.x, end.x) * curW
+                            val bottom = maxOf(start.y, end.y) * curH
+                            val fillPaint = Paint().apply {
+                                color = Color.parseColor(draw.colorHex)
+                                style = Paint.Style.FILL
+                                if (draw.isHighlighter) {
+                                    alpha = 100
+                                    xfermode = PorterDuffXfermode(PorterDuff.Mode.MULTIPLY)
+                                } else {
+                                    alpha = 255
+                                }
+                            }
+                            canvas.drawRect(left, top, right, bottom, fillPaint)
+                        }
                         "circle" -> {
                             val start = draw.points.first()
                             val end = draw.points.last()

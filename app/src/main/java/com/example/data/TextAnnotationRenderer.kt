@@ -102,7 +102,7 @@ object TextAnnotationRenderer {
             else -> baseRx
         }
         val rxEnd = rxStart + m.maxLineWidth
-        val pdfPadding = 28f * (refWidthPx / 400f)
+        val pdfPadding = 0f
         return RectF(
             rxStart - pdfPadding,
             ry + m.ascent - pdfPadding,

@@ -178,7 +178,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         text = "",
                         x = 0.08f,
                         y = 0.08f,
-                        fontSize = 14f,
+                        fontSize = 12f,
                         colorHex = "#1E293B",
                         isBold = false,
                         alignment = "left"
@@ -659,6 +659,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             val bottom = maxOf(start.y, end.y) * curH
                             canvas.drawRect(left, top, right, bottom, drawPaint)
                         }
+                        "filled_box" -> {
+                            val start = draw.points.first()
+                            val end = draw.points.last()
+                            val left = minOf(start.x, end.x) * curW
+                            val top = minOf(start.y, end.y) * curH
+                            val right = maxOf(start.x, end.x) * curW
+                            val bottom = maxOf(start.y, end.y) * curH
+                            val fillPaint = android.graphics.Paint().apply {
+                                color = baseColor
+                                style = android.graphics.Paint.Style.FILL
+                                isAntiAlias = true
+                                if (draw.isHighlighter) {
+                                    alpha = (255 * 0.45f).toInt()
+                                } else {
+                                    alpha = 255
+                                }
+                            }
+                            canvas.drawRect(left, top, right, bottom, fillPaint)
+                        }
                         "redact" -> {
                             val start = draw.points.first()
                             val end = draw.points.last()
@@ -740,7 +759,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     val rxEnd = rxStart + maxLineWidth
 
-                    val pdfPadding = 28f * (curW / 400f)
+                    val pdfPadding = 0f
                     val rectLeft = rxStart - pdfPadding
                     val rectTop = ry + fontMetrics.ascent - pdfPadding
                     val rectRight = rxEnd + pdfPadding
@@ -2649,7 +2668,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 text = recognizedText,
                 x = 0.08f,
                 y = 0.08f,
-                fontSize = 14f,
+                fontSize = 12f,
                 colorHex = "#1E293B",
                 isBold = false,
                 alignment = "left"

@@ -54,150 +54,182 @@ object OcrPdfHelper {
     }
 
     /**
-     * Extracts text from a background page image using local ML Kit, 
+     * Extracts text from a background page image using local ML Kit,
      * returning a list of editable TextAnnotationDef items mapped to positions.
+     *
+     * Uses WORD-level (ML Kit "elements") granularity rather than line-level.
+     * Line-level grouping merges adjacent table columns into one garbled text
+     * run on tabular documents (receipts, invoices) — word-level keeps every
+     * label/number in its own correctly positioned, correctly sized box.
      */
     suspend fun extractPageWordsAsAnnotations(
         context: Context,
         backgroundScanPath: String
     ): List<TextAnnotationDef> = withContext(Dispatchers.IO) {
-        val annotations = mutableListOf<TextAnnotationDef>()
-        try {
-            val file = File(backgroundScanPath)
-            if (!file.exists()) {
-                Log.e(TAG, "Scan background image does not exist: $backgroundScanPath")
-                return@withContext emptyList()
-            }
-            val bitmap = BitmapFactory.decodeFile(file.absolutePath) ?: return@withContext emptyList()
-            
-            val textRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
-            val image = InputImage.fromBitmap(bitmap, 0)
-            val result = com.google.android.gms.tasks.Tasks.await(textRecognizer.process(image))
-            
-            val imgWidth = bitmap.width.toFloat()
-            val imgHeight = bitmap.height.toFloat()
-            
-            var idCounter = 0
-            for (block in result.textBlocks) {
-                for (line in block.lines) {
-                    val text = line.text
-                    if (text.isBlank()) continue
-                    val box = line.boundingBox ?: continue
-                    
-                    // Convert to relative coordinates (0..1)
-                    val rx = box.left.toFloat() / imgWidth
-                    val ry = box.top.toFloat() / imgHeight
-                    
-                    // Approximate font size based on height
-                    val heightPx = box.height().toFloat()
-                    val fontSize = (heightPx / imgHeight) * 350f
-                    
-                    annotations.add(
-                        TextAnnotationDef(
-                            id = "ocr_det_${System.currentTimeMillis()}_${idCounter++}",
-                            text = text,
-                            x = rx.coerceIn(0f, 1f),
-                            y = ry.coerceIn(0f, 1f),
-                            fontSize = if (fontSize > 4f) fontSize.coerceIn(8f, 24f) else 12f,
-                            colorHex = "#1E293B" // default dark slate color
-                        )
-                    )
-                }
-            }
-            bitmap.recycle()
-        } catch (e: Exception) {
-            Log.e(TAG, "Error performing ML Kit OCR", e)
-        }
-        return@withContext annotations
+        val file = File(backgroundScanPath)
+        if (!file.exists()) return@withContext emptyList()
+        val bitmap = BitmapFactory.decodeFile(file.absolutePath) ?: return@withContext emptyList()
+        val result = runOcr(bitmap)
+        val annotations = buildWordAnnotations(result, bitmap.width.toFloat(), bitmap.height.toFloat())
+        bitmap.recycle()
+        annotations
     }
 
     /**
-     * Performs OCR, extracts editable text boxes, AND removes the original text 
-     * from the scanned background image using basic white fill/inpainting.
-     * Returns a pair of (List of TextAnnotationDef, new background image path).
+     * Performs OCR, extracts editable WORD-level text boxes, AND removes the
+     * original text from the scanned background image (line-level white fill,
+     * so there's no gap of original ink left between words). Returns
+     * (editable TextAnnotationDef list, path to the cleaned background image).
      */
     suspend fun ocrAndCleanPageImage(
         context: Context,
         backgroundScanPath: String
     ): Pair<List<TextAnnotationDef>, String?> = withContext(Dispatchers.IO) {
-        val annotations = mutableListOf<TextAnnotationDef>()
-        var cleanedPath: String? = null
         try {
             val file = File(backgroundScanPath)
             if (!file.exists()) {
                 Log.e(TAG, "Scan background image does not exist: $backgroundScanPath")
                 return@withContext Pair(emptyList(), null)
             }
-            val bitmap = BitmapFactory.decodeFile(file.absolutePath) ?: return@withContext Pair(emptyList(), null)
-            
-            val textRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
-            val image = InputImage.fromBitmap(bitmap, 0)
-            val result = com.google.android.gms.tasks.Tasks.await(textRecognizer.process(image))
-            
-            val imgWidth = bitmap.width.toFloat()
-            val imgHeight = bitmap.height.toFloat()
-            
-            var idCounter = 0
-            for (block in result.textBlocks) {
-                for (line in block.lines) {
-                    val text = line.text
-                    if (text.isBlank()) continue
-                    val box = line.boundingBox ?: continue
-                    
-                    val rx = box.left.toFloat() / imgWidth
-                    val ry = box.top.toFloat() / imgHeight
-                    val heightPx = box.height().toFloat()
-                    val fontSize = (heightPx / imgHeight) * 350f
-                    
-                    annotations.add(
-                        TextAnnotationDef(
-                            id = "ocr_det_${System.currentTimeMillis()}_${idCounter++}",
-                            text = text,
-                            x = rx.coerceIn(0f, 1f),
-                            y = ry.coerceIn(0f, 1f),
-                            fontSize = if (fontSize > 4f) fontSize.coerceIn(8f, 24f) else 12f,
-                            colorHex = "#1E293B"
-                        )
-                    )
-                }
-            }
-            
-            // Clean/Inpaint background image
+            val bitmap = BitmapFactory.decodeFile(file.absolutePath)
+                ?: return@withContext Pair(emptyList(), null)
+
+            val result = runOcr(bitmap)
+            val annotations = buildWordAnnotations(result, bitmap.width.toFloat(), bitmap.height.toFloat())
+
+            // Clean/inpaint background: white-fill each LINE's box (not just each
+            // word) so no thin sliver of original ink is left between words.
             val cleanedBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, true)
             val canvas = Canvas(cleanedBitmap)
-            val paint = Paint().apply {
-                color = Color.WHITE
-                style = Paint.Style.FILL
-            }
-            
+            val paint = Paint().apply { color = Color.WHITE; style = Paint.Style.FILL }
             for (block in result.textBlocks) {
                 for (line in block.lines) {
                     val box = line.boundingBox ?: continue
-                    val expand = 4
+                    // Wider horizontal padding (covers edge slivers left by
+                    // the recognizer's box) but tighter vertical padding
+                    // (avoids eating into a ruled line sitting close above
+                    // or below the text).
+                    val hExpand = (box.height() * 0.22f).coerceIn(2f, 8f)
+                    val vExpand = (box.height() * 0.10f).coerceIn(1f, 4f)
                     canvas.drawRect(
-                        (box.left - expand).toFloat(),
-                        (box.top - expand).toFloat(),
-                        (box.right + expand).toFloat(),
-                        (box.bottom + expand).toFloat(),
+                        (box.left - hExpand),
+                        (box.top - vExpand),
+                        (box.right + hExpand),
+                        (box.bottom + vExpand),
                         paint
                     )
                 }
             }
-            
-            // Save cleaned image to files dir
+
             val cleanedFile = File(context.filesDir, "cleaned_ocr_${System.currentTimeMillis()}_${UUID.randomUUID()}.jpg")
-            val fos = FileOutputStream(cleanedFile)
-            cleanedBitmap.compress(Bitmap.CompressFormat.JPEG, 90, fos)
-            fos.close()
-            
-            cleanedPath = cleanedFile.absolutePath
-            
+            FileOutputStream(cleanedFile).use { fos ->
+                cleanedBitmap.compress(Bitmap.CompressFormat.JPEG, 95, fos)
+            }
+
             bitmap.recycle()
             cleanedBitmap.recycle()
+            Pair(annotations, cleanedFile.absolutePath)
         } catch (e: Exception) {
             Log.e(TAG, "Error performing ML Kit OCR and image cleaning", e)
+            Pair(emptyList(), null)
         }
-        return@withContext Pair(annotations, cleanedPath)
+    }
+
+    private suspend fun runOcr(bitmap: Bitmap): com.google.mlkit.vision.text.Text = withContext(Dispatchers.IO) {
+        val textRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+        val image = InputImage.fromBitmap(bitmap, 0)
+        com.google.android.gms.tasks.Tasks.await(textRecognizer.process(image))
+    }
+
+    /**
+     * ML Kit occasionally reports the same text twice as two heavily
+     * overlapping boxes (common on small/compact labels). Without this,
+     * you get doubled/ghosted text like "UUSERGAN ENG JOO" instead of
+     * "USER GAN ENG JOO".
+     */
+    private fun dedupeOverlapping(
+        words: List<Pair<String, android.graphics.Rect>>
+    ): List<Pair<String, android.graphics.Rect>> {
+        val sorted = words.sortedByDescending { it.second.width().toLong() * it.second.height().toLong() }
+        val kept = mutableListOf<Pair<String, android.graphics.Rect>>()
+        for (candidate in sorted) {
+            val box = candidate.second
+            val boxArea = (box.width() * box.height()).toFloat()
+            val isDup = kept.any { existing ->
+                val e = existing.second
+                val left = maxOf(box.left, e.left)
+                val top = maxOf(box.top, e.top)
+                val right = minOf(box.right, e.right)
+                val bottom = minOf(box.bottom, e.bottom)
+                if (right <= left || bottom <= top) return@any false
+                val overlapArea = ((right - left) * (bottom - top)).toFloat()
+                val minArea = minOf(boxArea, (e.width() * e.height()).toFloat())
+                minArea > 0f && (overlapArea / minArea) > 0.5f
+            }
+            if (!isDup) kept.add(candidate)
+        }
+        return kept
+    }
+
+    /**
+     * Converts ML Kit word-level results into TextAnnotationDef objects.
+     * IMPORTANT: fontSize here is expressed in the SAME "400px reference width"
+     * unit that TextAnnotationRenderer / PdfGenerator use everywhere else in
+     * the app. Get this unit wrong and every OCR'd word renders at the wrong
+     * (usually doubled) size once it goes through the normal text pipeline.
+     */
+    private fun buildWordAnnotations(
+        result: com.google.mlkit.vision.text.Text,
+        imgWidth: Float,
+        imgHeight: Float
+    ): List<TextAnnotationDef> {
+        val rawWords = mutableListOf<Pair<String, android.graphics.Rect>>()
+        for (block in result.textBlocks) {
+            for (line in block.lines) {
+                for (element in line.elements) {
+                    val text = element.text
+                    if (text.isBlank()) continue
+                    val box = element.boundingBox ?: continue
+                    rawWords.add(text to box)
+                }
+            }
+        }
+
+        val dedupedWords = dedupeOverlapping(rawWords)
+        val annotations = mutableListOf<TextAnnotationDef>()
+        var idCounter = 0
+
+        for ((text, box) in dedupedWords) {
+            val rx = box.left.toFloat() / imgWidth
+            val ry = box.top.toFloat() / imgHeight
+            val boxWidthPx = box.width().toFloat()
+
+            var fontSize = (box.height().toFloat() * (400f / imgWidth)).coerceIn(5f, 80f)
+
+            // Auto-fit: target slightly NARROWER than the detected box (94%)
+            // rather than letting it fill the full box — guarantees a real
+            // gap survives between two tightly-kerned words (dates, times,
+            // numbers) even when the substitute font is a bit wider.
+            val probeDef = TextAnnotationDef(id = "", text = text, x = 0f, y = 0f, fontSize = fontSize)
+            val probePaint = TextAnnotationRenderer.buildPaint(probeDef, imgWidth)
+            val measuredWidth = probePaint.measureText(text)
+            val targetWidth = boxWidthPx * 0.94f
+            if (measuredWidth > targetWidth && measuredWidth > 0f) {
+                fontSize = (fontSize * (targetWidth / measuredWidth)).coerceAtLeast(4f)
+            }
+
+            annotations.add(
+                TextAnnotationDef(
+                    id = "ocr_det_${System.currentTimeMillis()}_${idCounter++}",
+                    text = text,
+                    x = rx.coerceIn(0f, 1f),
+                    y = ry.coerceIn(0f, 1f),
+                    fontSize = fontSize,
+                    colorHex = "#1E293B"
+                )
+            )
+        }
+        return annotations
     }
 
     /**
