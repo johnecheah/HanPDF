@@ -63,6 +63,7 @@ class ResizableDraggableSignatureView @JvmOverloads constructor(
         style = Paint.Style.STROKE
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
+        isAntiAlias = true
     }
 
     var onSignatureChanged: ((Float, Float, Float, Float) -> Unit)? = null // (translationX, translationY, newWidth, newHeight)
@@ -205,22 +206,9 @@ class ResizableDraggableSignatureView @JvmOverloads constructor(
             val destRect = RectF(0f, 0f, width.toFloat(), height.toFloat())
             canvas.drawBitmap(bmp, null, destRect, null)
         } else if (vectorPoints.isNotEmpty()) {
-            val path = android.graphics.Path()
-            var isFirst = true
-            for (pt in vectorPoints) {
-                if (pt.x == -1f && pt.y == -1f) {
-                    isFirst = true
-                    continue
-                }
-                val px = pt.x * width
-                val py = pt.y * height
-                if (isFirst) {
-                    path.moveTo(px, py)
-                    isFirst = false
-                } else {
-                    path.lineTo(px, py)
-                }
-            }
+            val path = com.example.data.SignaturePathUtils.buildSmoothedPath(
+                vectorPoints, width.toFloat(), height.toFloat()
+            )
             canvas.drawPath(path, vectorPaint)
         }
 

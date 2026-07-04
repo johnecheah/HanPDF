@@ -294,7 +294,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     "blank" -> "Blank Note"
                     "lined" -> "Lined Note"
                     "cornell" -> "Cornell Note"
-                    else -> "Meeting Minutes"
+                    else -> "Blank Doc"
                 },
                 pageCount = 1,
                 contentJson = json,
@@ -1484,20 +1484,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             strokeJoin = android.graphics.Paint.Join.ROUND
                             isAntiAlias = true
                         }
-                        val path = android.graphics.Path()
-                        val first = points.first()
-                        path.moveTo(first.x * destW, first.y * destH)
-                        for (i in 1 until points.size) {
-                            val pt = points[i]
-                            if (pt.x == -1f && pt.y == -1f) {
-                                if (i + 1 < points.size) {
-                                    val next = points[i + 1]
-                                    path.moveTo(next.x * destW, next.y * destH)
-                                }
-                            } else {
-                                path.lineTo(pt.x * destW, pt.y * destH)
-                            }
-                        }
+                        val path = com.example.data.SignaturePathUtils.buildSmoothedPath(
+                            points, destW.toFloat(), destH.toFloat()
+                        )
                         canvas.drawPath(path, inkPaint)
                     }
                 }
@@ -2209,7 +2198,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             
             val combinedDoc = Document(
                 title = actualTitle,
-                category = "Combined PDF",
+                category = "Combine",
                 pageCount = mergedPages.size,
                 contentJson = json,
                 isSaved = true
@@ -2742,7 +2731,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 val mergedDoc = Document(
                     title = masterTitle.ifBlank { "Merged Document ${System.currentTimeMillis() % 1000}" },
-                    category = "PDF",
+                    category = "Combine",
                     pageCount = finalPages.size,
                     contentJson = json,
                     isSaved = true

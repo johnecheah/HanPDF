@@ -21,11 +21,13 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitDragOrCancellation
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionOnScreen
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -456,7 +458,7 @@ fun DashboardScreen(
         }
     }
 
-    val categories = listOf("All", "PDF", "Scan", "ID Card", "Meeting Minutes")
+    val categories = listOf("All", "Combine", "Scan", "ID Card", "Blank Doc")
 
     Scaffold(
         floatingActionButton = {
@@ -1284,7 +1286,7 @@ fun DocumentListItem(
                     .clip(RoundedCornerShape(12.dp))
                     .background(
                         when (doc.category.lowercase()) {
-                            "pdf" -> Color(0xFFFDE8E8)
+                            "combine", "pdf", "combined pdf" -> Color(0xFFFDE8E8)
                             "scan" -> Color(0xFFE8F2FD)
                             "id card" -> Color(0xFFE2F9F3)
                             else -> Color(0xFFF2F4F7)
@@ -1294,14 +1296,14 @@ fun DocumentListItem(
             ) {
                 Icon(
                     imageVector = when (doc.category.lowercase()) {
-                        "pdf" -> Icons.Default.PictureAsPdf
+                        "combine", "pdf", "combined pdf" -> Icons.Default.PictureAsPdf
                         "scan" -> Icons.Default.CameraAlt
                         "id card" -> Icons.Default.CreditCard
                         else -> Icons.Default.EditNote
                     },
                     contentDescription = null,
                     tint = when (doc.category.lowercase()) {
-                        "pdf" -> Color(0xFFE52521)
+                        "combine", "pdf", "combined pdf" -> Color(0xFFE52521)
                         "scan" -> Color(0xFF1B3B6F)
                         "id card" -> Color(0xFF10AC84)
                         else -> Color(0xFF5A6B7C)
@@ -4218,8 +4220,8 @@ fun EditorScreenRemoved(
     var addWordTextDraft by remember { mutableStateOf("") }
     var addWordFontFamily by remember { mutableStateOf("arial") }
     var editWordFontFamily by remember { mutableStateOf("arial") }
-    var addWordFontSize by remember { mutableFloatStateOf(14f) }
-    var editWordFontSize by remember { mutableFloatStateOf(14f) }
+    var addWordFontSize by remember { mutableFloatStateOf(20f) }
+    var editWordFontSize by remember { mutableFloatStateOf(20f) }
     var addWordColorHex by remember { mutableStateOf("#000000") }
     var editWordColorHex by remember { mutableStateOf("#000000") }
     var addWordBgColorHex by remember { mutableStateOf("transparent") }
@@ -4301,6 +4303,14 @@ fun EditorScreenRemoved(
     var activeEditorTab by remember { mutableStateOf("view") }
     var isPresentationMode by remember { mutableStateOf(false) }
     var isContinuousScrollMode by remember { mutableStateOf(false) }
+    val lazyListState = rememberLazyListState()
+
+    LaunchedEffect(activePage.id, isContinuousScrollMode) {
+        val activeIdx = pages.indexOf(activePage)
+        if (isContinuousScrollMode && activeIdx >= 0) {
+            lazyListState.animateScrollToItem(activeIdx)
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -4572,6 +4582,58 @@ fun EditorScreenRemoved(
                                     )
 
                                     Spacer(modifier = Modifier.weight(1f))
+
+                                    val activeIdx = pages.indexOf(activePage)
+
+                                    // Previous Page Button
+                                    IconButton(
+                                        onClick = {
+                                            if (activeIdx > 0) {
+                                                viewModel.setActivePageId(pages[activeIdx - 1].id)
+                                            }
+                                        },
+                                        enabled = activeIdx > 0,
+                                        modifier = Modifier
+                                            .background(
+                                                if (activeIdx > 0) MaterialTheme.colorScheme.secondaryContainer 
+                                                else MaterialTheme.colorScheme.surfaceVariant, 
+                                                CircleShape
+                                            )
+                                            .size(28.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.ChevronLeft,
+                                            contentDescription = "Previous Page",
+                                            tint = if (activeIdx > 0) MaterialTheme.colorScheme.onSecondaryContainer 
+                                                   else Color.Gray,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+
+                                    // Next Page Button
+                                    IconButton(
+                                        onClick = {
+                                            if (activeIdx < pages.size - 1) {
+                                                viewModel.setActivePageId(pages[activeIdx + 1].id)
+                                            }
+                                        },
+                                        enabled = activeIdx < pages.size - 1,
+                                        modifier = Modifier
+                                            .background(
+                                                if (activeIdx < pages.size - 1) MaterialTheme.colorScheme.secondaryContainer 
+                                                else MaterialTheme.colorScheme.surfaceVariant, 
+                                                CircleShape
+                                            )
+                                            .size(28.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.ChevronRight,
+                                            contentDescription = "Next Page",
+                                            tint = if (activeIdx < pages.size - 1) MaterialTheme.colorScheme.onSecondaryContainer 
+                                                   else Color.Gray,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
 
                                     // Fullscreen Presentation Mode Button
                                     IconButton(
@@ -4984,6 +5046,7 @@ fun EditorScreenRemoved(
                             }
                         }
                         "signature" -> {
+                            val selectedSig = currentSignatures.find { it.id == selectedAnnotationId }
                             Column(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -4995,93 +5058,81 @@ fun EditorScreenRemoved(
                                 ) {
                                     Text("Saved Signature Profiles", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                                     
-                                    Button(
-                                        onClick = { viewModel.navigateTo(Screen.SignatureStudio) },
-                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
-                                        shape = RoundedCornerShape(6.dp),
-                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                        modifier = Modifier.height(26.dp)
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
-                                        Icon(Icons.Default.Add, null, modifier = Modifier.size(12.dp))
+                                        // 1. Decrease signature size
+                                        Box(
+                                            modifier = Modifier
+                                                .size(28.dp)
+                                                .background(
+                                                    if (selectedSig != null) Color(0xFFFEF3C7) else Color(0xFF94A3B8).copy(alpha = 0.3f),
+                                                    CircleShape
+                                                )
+                                                .clickable(enabled = selectedSig != null) {
+                                                    selectedSig?.let { sig ->
+                                                        val newWidth = (sig.width * 0.85f).coerceAtLeast(20f)
+                                                        val newHeight = (sig.height * 0.85f).coerceAtLeast(10f)
+                                                        val idx = currentSignatures.indexOfFirst { it.id == sig.id }
+                                                        if (idx != -1) {
+                                                            currentSignatures[idx] = sig.copy(width = newWidth, height = newHeight)
+                                                            viewModel.editActivePageSignatures(currentSignatures.toList())
+                                                        }
+                                                    }
+                                                },
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = "A",
+                                                fontSize = 8.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (selectedSig != null) Color(0xFFD97706) else Color.White
+                                            )
+                                        }
+
+                                        // 2. Increase signature size
+                                        Box(
+                                            modifier = Modifier
+                                                .size(28.dp)
+                                                .background(
+                                                    if (selectedSig != null) Color(0xFFFEF3C7) else Color(0xFF94A3B8).copy(alpha = 0.3f),
+                                                    CircleShape
+                                                )
+                                                .clickable(enabled = selectedSig != null) {
+                                                    selectedSig?.let { sig ->
+                                                        val newWidth = (sig.width * 1.15f).coerceAtMost(600f)
+                                                        val newHeight = (sig.height * 1.15f).coerceAtMost(300f)
+                                                        val idx = currentSignatures.indexOfFirst { it.id == sig.id }
+                                                        if (idx != -1) {
+                                                            currentSignatures[idx] = sig.copy(width = newWidth, height = newHeight)
+                                                            viewModel.editActivePageSignatures(currentSignatures.toList())
+                                                        }
+                                                    }
+                                                },
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = "A",
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (selectedSig != null) Color(0xFFD97706) else Color.White
+                                            )
+                                        }
+
                                         Spacer(modifier = Modifier.width(4.dp))
-                                        Text("Signature Studio", fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                    }
-                                }
 
-                                // "A,A" size controls under the "+Signature Studio" button
-                                val selectedSig = currentSignatures.find { it.id == selectedAnnotationId }
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.End,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    if (selectedSig != null) {
-                                        Text(
-                                            text = "Selected Signature Size: ",
-                                            fontSize = 10.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.padding(end = 8.dp)
-                                        )
-                                    }
-                                    
-                                    // 1. Decrease signature size
-                                    Box(
-                                        modifier = Modifier
-                                            .size(28.dp)
-                                            .background(
-                                                if (selectedSig != null) Color(0xFFFEF3C7) else Color(0xFF94A3B8).copy(alpha = 0.3f),
-                                                CircleShape
-                                            )
-                                            .clickable(enabled = selectedSig != null) {
-                                                selectedSig?.let { sig ->
-                                                    val newWidth = (sig.width * 0.85f).coerceAtLeast(20f)
-                                                    val newHeight = (sig.height * 0.85f).coerceAtLeast(10f)
-                                                    val idx = currentSignatures.indexOfFirst { it.id == sig.id }
-                                                    if (idx != -1) {
-                                                        currentSignatures[idx] = sig.copy(width = newWidth, height = newHeight)
-                                                        viewModel.editActivePageSignatures(currentSignatures.toList())
-                                                    }
-                                                }
-                                            },
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = "A",
-                                            fontSize = 8.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = if (selectedSig != null) Color(0xFFD97706) else Color.White
-                                        )
-                                    }
-
-                                    Spacer(modifier = Modifier.width(10.dp))
-
-                                    // 2. Increase signature size
-                                    Box(
-                                        modifier = Modifier
-                                            .size(28.dp)
-                                            .background(
-                                                if (selectedSig != null) Color(0xFFFEF3C7) else Color(0xFF94A3B8).copy(alpha = 0.3f),
-                                                CircleShape
-                                            )
-                                            .clickable(enabled = selectedSig != null) {
-                                                selectedSig?.let { sig ->
-                                                    val newWidth = (sig.width * 1.15f).coerceAtMost(600f)
-                                                    val newHeight = (sig.height * 1.15f).coerceAtMost(300f)
-                                                    val idx = currentSignatures.indexOfFirst { it.id == sig.id }
-                                                    if (idx != -1) {
-                                                        currentSignatures[idx] = sig.copy(width = newWidth, height = newHeight)
-                                                        viewModel.editActivePageSignatures(currentSignatures.toList())
-                                                    }
-                                                }
-                                            },
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = "A",
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = if (selectedSig != null) Color(0xFFD97706) else Color.White
-                                        )
+                                        Button(
+                                            onClick = { viewModel.navigateTo(Screen.SignatureStudio) },
+                                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+                                            shape = RoundedCornerShape(6.dp),
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                            modifier = Modifier.height(26.dp)
+                                        ) {
+                                            Icon(Icons.Default.Add, null, modifier = Modifier.size(12.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("Signature Studio", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        }
                                     }
                                 }
 
@@ -5600,6 +5651,7 @@ fun EditorScreenRemoved(
             ) {
                 if (isContinuousScrollMode) {
                     LazyColumn(
+                        state = lazyListState,
                         modifier = Modifier.fillMaxSize(),
                         verticalArrangement = Arrangement.spacedBy(24.dp),
                         contentPadding = PaddingValues(24.dp),
@@ -5994,10 +6046,8 @@ fun EditorScreenRemoved(
 
                 if (activePage.type.lowercase() == "word") {
                     val wordAnn = activePage.textAnnotations.firstOrNull { it.id == "word_main_content" }
-                    
-                    var wordTextValue by remember(activePage.id) {
-                        mutableStateOf(wordAnn?.text ?: "")
-                    }
+
+                    var wordTextValue by remember(activePage.id) { mutableStateOf(wordAnn?.text ?: "") }
                     var wordFontSize by remember(activePage.id) { mutableStateOf(wordAnn?.fontSize ?: 12f) }
                     var wordColorHex by remember(activePage.id) { mutableStateOf(wordAnn?.colorHex ?: "#1E293B") }
                     var wordIsBold by remember(activePage.id) { mutableStateOf(wordAnn?.isBold ?: false) }
@@ -6007,85 +6057,134 @@ fun EditorScreenRemoved(
                     var wordHasUnderline by remember(activePage.id) { mutableStateOf(wordAnn?.hasUnderline ?: false) }
                     var wordHasStrikeThrough by remember(activePage.id) { mutableStateOf(wordAnn?.hasStrikeThrough ?: false) }
 
-                    val updateWordAnn = { newText: String, size: Float, color: String, bold: Boolean, italic: Boolean, align: String, font: String, underline: Boolean, strike: Boolean ->
-                        val updatedList = currentTextAnns.toMutableList()
-                        val idx = updatedList.indexOfFirst { it.id == "word_main_content" }
-                        val updatedAnn = com.example.data.TextAnnotationDef(
-                            id = "word_main_content",
-                            text = newText,
-                            x = 0.08f,
-                            y = 0.08f,
-                            fontSize = size,
-                            colorHex = color,
-                            fontName = font,
-                            isBold = bold,
-                            isItalic = italic,
-                            alignment = align,
-                            hasUnderline = underline,
-                            hasStrikeThrough = strike
-                        )
-                        if (idx != -1) {
-                            updatedList[idx] = updatedAnn
-                        } else {
-                            updatedList.add(updatedAnn)
-                        }
-                        
-                        val idxLocal = currentTextAnns.indexOfFirst { it.id == "word_main_content" }
-                        if (idxLocal != -1) {
-                            currentTextAnns[idxLocal] = updatedAnn
-                        } else {
-                            currentTextAnns.add(updatedAnn)
-                        }
-                        viewModel.editActivePageAnnotations(updatedList)
+                    val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
+                    var wordBoxWidthPx by remember(activePage.id) { mutableStateOf(0) }
+                    var wordBoxHeightPx by remember(activePage.id) { mutableStateOf(0) }
+
+                    val pFontFamily = when (wordFontName.lowercase()) {
+                        "serif" -> androidx.compose.ui.text.font.FontFamily.Serif
+                        "monospace" -> androidx.compose.ui.text.font.FontFamily.Monospace
+                        else -> androidx.compose.ui.text.font.FontFamily.Default
+                    }
+                    val pTextDecoration = when {
+                        wordHasUnderline && wordHasStrikeThrough ->
+                            androidx.compose.ui.text.style.TextDecoration.Underline + androidx.compose.ui.text.style.TextDecoration.LineThrough
+                        wordHasUnderline -> androidx.compose.ui.text.style.TextDecoration.Underline
+                        wordHasStrikeThrough -> androidx.compose.ui.text.style.TextDecoration.LineThrough
+                        else -> androidx.compose.ui.text.style.TextDecoration.None
+                    }
+                    val pFontWeight = if (wordIsBold) FontWeight.Bold else FontWeight.Normal
+                    val pFontStyle = if (wordIsItalic) androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal
+                    val pTextAlign = when (wordAlignment.lowercase()) {
+                        "center" -> androidx.compose.ui.text.style.TextAlign.Center
+                        "right" -> androidx.compose.ui.text.style.TextAlign.Right
+                        else -> androidx.compose.ui.text.style.TextAlign.Left
                     }
 
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color.White)
-                    ) {
-                        // 2. TEXT WORKSPACE WINDOW
-                        val pFontFamily = when (wordFontName.lowercase()) {
-                            "serif" -> androidx.compose.ui.text.font.FontFamily.Serif
-                            "monospace" -> androidx.compose.ui.text.font.FontFamily.Monospace
-                            else -> androidx.compose.ui.text.font.FontFamily.Default
-                        }
-                        val pTextDecoration = when {
-                            wordHasUnderline && wordHasStrikeThrough -> androidx.compose.ui.text.style.TextDecoration.Underline + androidx.compose.ui.text.style.TextDecoration.LineThrough
-                            wordHasUnderline -> androidx.compose.ui.text.style.TextDecoration.Underline
-                            wordHasStrikeThrough -> androidx.compose.ui.text.style.TextDecoration.LineThrough
-                            else -> androidx.compose.ui.text.style.TextDecoration.None
-                        }
-                        val pFontWeight = if (wordIsBold) FontWeight.Bold else FontWeight.Normal
-                        val pFontStyle = if (wordIsItalic) androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal
-                        val pTextAlign = when (wordAlignment.lowercase()) {
-                            "center" -> androidx.compose.ui.text.style.TextAlign.Center
-                            "right" -> androidx.compose.ui.text.style.TextAlign.Right
-                            else -> androidx.compose.ui.text.style.TextAlign.Left
+                    val wordTextStyle = androidx.compose.ui.text.TextStyle(
+                        fontSize = wordFontSize.sp,
+                        color = Color(android.graphics.Color.parseColor(wordColorHex)),
+                        fontFamily = pFontFamily,
+                        fontWeight = pFontWeight,
+                        fontStyle = pFontStyle,
+                        textDecoration = pTextDecoration,
+                        textAlign = pTextAlign,
+                        lineHeight = (wordFontSize * 1.5f).sp
+                    )
+
+                    // Applies typed text, auto-flowing overflow onto the next "word" page
+                    // (creating one if needed) and pulling text back if it fits again.
+                    fun commitWordText(newText: String) {
+                        wordTextValue = newText
+
+                        if (wordBoxWidthPx <= 0 || wordBoxHeightPx <= 0) return
+
+                        val allPages = state.activeDocumentContent.pages
+                        val activeIndex = allPages.indexOfFirst { it.id == activePage.id }
+                        if (activeIndex == -1) return
+
+                        // Contiguous run of "word" pages this page belongs to
+                        var runStart = activeIndex
+                        while (runStart > 0 && allPages[runStart - 1].type.lowercase() == "word") runStart--
+                        var runEnd = activeIndex
+                        while (runEnd < allPages.size - 1 && allPages[runEnd + 1].type.lowercase() == "word") runEnd++
+                        val runPages = allPages.subList(runStart, runEnd + 1)
+
+                        val fullText = runPages.joinToString("") { page ->
+                            if (page.id == activePage.id) newText
+                            else page.textAnnotations.firstOrNull { it.id == "word_main_content" }?.text ?: ""
                         }
 
+                        val chunks = WordPagePaginator.paginate(
+                            measurer = textMeasurer,
+                            fullText = fullText,
+                            style = wordTextStyle,
+                            contentWidthPx = wordBoxWidthPx,
+                            contentHeightPx = wordBoxHeightPx
+                        )
+
+                        val updatedPages = allPages.toMutableList()
+
+                        fun makeAnn(text: String) = com.example.data.TextAnnotationDef(
+                            id = "word_main_content", text = text, x = 0.08f, y = 0.08f,
+                            fontSize = wordFontSize, colorHex = wordColorHex, fontName = wordFontName,
+                            isBold = wordIsBold, isItalic = wordIsItalic, alignment = wordAlignment,
+                            hasUnderline = wordHasUnderline, hasStrikeThrough = wordHasStrikeThrough
+                        )
+
+                        runPages.indices.forEach { i ->
+                            val idx = runStart + i
+                            val page = updatedPages[idx]
+                            val newAnns = page.textAnnotations.filterNot { it.id == "word_main_content" } + makeAnn(chunks.getOrNull(i) ?: "")
+                            updatedPages[idx] = page.copy(textAnnotations = newAnns)
+                        }
+
+                        if (chunks.size > runPages.size) {
+                            var insertAt = runStart + runPages.size
+                            for (i in runPages.size until chunks.size) {
+                                updatedPages.add(
+                                    insertAt,
+                                    com.example.data.PageDef(
+                                        id = java.util.UUID.randomUUID().toString(),
+                                        pageNumber = 0,
+                                        type = "word",
+                                        textAnnotations = listOf(makeAnn(chunks[i]))
+                                    )
+                                )
+                                insertAt++
+                            }
+                        }
+
+                        // Trim now-empty trailing "word" pages
+                        var lastIdx = runStart + maxOf(runPages.size, chunks.size) - 1
+                        while (
+                            lastIdx > runStart && updatedPages.size > 1 &&
+                            updatedPages[lastIdx].type.lowercase() == "word" &&
+                            updatedPages[lastIdx].textAnnotations.firstOrNull { it.id == "word_main_content" }?.text.isNullOrEmpty() &&
+                            updatedPages[lastIdx].drawings.isEmpty() && updatedPages[lastIdx].signatures.isEmpty()
+                        ) {
+                            updatedPages.removeAt(lastIdx)
+                            lastIdx--
+                        }
+
+                        viewModel.reorderActivePages(updatedPages)
+                    }
+
+                    Column(modifier = Modifier.fillMaxSize().background(Color.White)) {
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .background(Color.White)
                                 .padding(horizontal = 24.dp, vertical = 18.dp)
+                                .onSizeChanged { size ->
+                                    wordBoxWidthPx = size.width
+                                    wordBoxHeightPx = size.height
+                                }
                         ) {
                             androidx.compose.foundation.text.BasicTextField(
                                 value = wordTextValue,
-                                onValueChange = { newText ->
-                                    wordTextValue = newText
-                                    updateWordAnn(newText, wordFontSize, wordColorHex, wordIsBold, wordIsItalic, wordAlignment, wordFontName, wordHasUnderline, wordHasStrikeThrough)
-                                },
-                                textStyle = androidx.compose.ui.text.TextStyle(
-                                    fontSize = wordFontSize.sp,
-                                    color = Color(android.graphics.Color.parseColor(wordColorHex)),
-                                    fontFamily = pFontFamily,
-                                    fontWeight = pFontWeight,
-                                    fontStyle = pFontStyle,
-                                    textDecoration = pTextDecoration,
-                                    textAlign = pTextAlign,
-                                    lineHeight = (wordFontSize * 1.5f).sp
-                                ),
+                                onValueChange = { newText -> commitWordText(newText) },
+                                textStyle = wordTextStyle,
                                 modifier = Modifier.fillMaxSize(),
                                 decorationBox = { innerTextField ->
                                     Box(modifier = Modifier.fillMaxSize()) {
@@ -6345,7 +6444,7 @@ fun EditorScreenRemoved(
                     showAddWordDialog = false
                     isAddingTextMode = false
                 },
-                title = { Text("Type Word / Text Annotation", fontWeight = FontWeight.Bold) },
+                title = { Text("Text Annotation", fontWeight = FontWeight.Bold) },
                 text = {
                     Column(
                         modifier = Modifier.fillMaxWidth(),
@@ -6359,12 +6458,13 @@ fun EditorScreenRemoved(
                             modifier = Modifier.fillMaxWidth()
                         )
 
-                        // Live Interactive Design Preview Card
+                        // Live Interactive Design Preview Card with white background
                         Card(
                             colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f)
+                                containerColor = Color.White
                             ),
                             shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, Color.LightGray),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(vertical = 4.dp)
@@ -6434,11 +6534,11 @@ fun EditorScreenRemoved(
                                     modifier = Modifier.weight(1f).height(36.dp),
                                     contentPadding = PaddingValues(0.dp),
                                     colors = ButtonDefaults.outlinedButtonColors(
-                                        containerColor = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else Color.Transparent
+                                        containerColor = if (isSelected) MaterialTheme.colorScheme.primary else Color(0xFF7F8C8D)
                                     ),
                                     border = BorderStroke(
                                         width = if (isSelected) 2.dp else 1.dp,
-                                        color = if (isSelected) MaterialTheme.colorScheme.primary else Color.LightGray
+                                        color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent
                                     )
                                 ) {
                                     Text(
@@ -6446,7 +6546,7 @@ fun EditorScreenRemoved(
                                         fontSize = 11.sp,
                                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                                         fontFamily = getFontFamily(fontKey),
-                                        color = if (isSelected) MaterialTheme.colorScheme.primary else Color.DarkGray
+                                        color = Color.White
                                     )
                                 }
                             }
@@ -6482,6 +6582,7 @@ fun EditorScreenRemoved(
                         ) {
                             listOf(
                                 "#000000" to Color.Black,
+                                "#FFFFFF" to Color.White,
                                 "#D62246" to Color(0xFFD62246),
                                 "#005FB8" to Color(0xFF005FB8),
                                 "#10AC84" to Color(0xFF10AC84),
@@ -6494,7 +6595,7 @@ fun EditorScreenRemoved(
                                         .background(colorVal, CircleShape)
                                         .border(
                                             width = if (isSelected) 3.dp else 1.dp,
-                                            color = if (isSelected) Color.White else Color.Transparent,
+                                            color = if (isSelected) (if (colorVal == Color.White) Color.Black else Color.White) else Color.LightGray,
                                             shape = CircleShape
                                         )
                                         .clickable { addWordColorHex = colorKey }
@@ -6540,19 +6641,19 @@ fun EditorScreenRemoved(
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(6.dp))
+                        Spacer(modifier = Modifier.height(4.dp))
                         Text("Style & Formatting:", fontSize = 13.sp, fontWeight = FontWeight.Bold)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Bold Option
+                            // Bold Toggle
                             IconButton(
                                 onClick = { addWordIsBold = !addWordIsBold },
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(40.dp)
+                                    .height(32.dp)
                                     .background(
                                         if (addWordIsBold) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
                                         RoundedCornerShape(8.dp)
@@ -6566,16 +6667,17 @@ fun EditorScreenRemoved(
                                 Icon(
                                     imageVector = Icons.Default.FormatBold,
                                     contentDescription = "Bold Toggle",
-                                    tint = if (addWordIsBold) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                    tint = if (addWordIsBold) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
                                 )
                             }
 
-                            // Italic Option
+                            // Italic Toggle
                             IconButton(
                                 onClick = { addWordIsItalic = !addWordIsItalic },
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(40.dp)
+                                    .height(32.dp)
                                     .background(
                                         if (addWordIsItalic) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
                                         RoundedCornerShape(8.dp)
@@ -6589,16 +6691,17 @@ fun EditorScreenRemoved(
                                 Icon(
                                     imageVector = Icons.Default.FormatItalic,
                                     contentDescription = "Italic Toggle",
-                                    tint = if (addWordIsItalic) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                    tint = if (addWordIsItalic) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
                                 )
                             }
 
-                            // Single Underline Option
+                            // Single Underline Toggle
                             IconButton(
                                 onClick = { addWordHasUnderline = !addWordHasUnderline },
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(40.dp)
+                                    .height(32.dp)
                                     .background(
                                         if (addWordHasUnderline) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
                                         RoundedCornerShape(8.dp)
@@ -6612,16 +6715,17 @@ fun EditorScreenRemoved(
                                 Icon(
                                     imageVector = Icons.Default.FormatUnderlined,
                                     contentDescription = "Underline Toggle",
-                                    tint = if (addWordHasUnderline) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                    tint = if (addWordHasUnderline) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
                                 )
                             }
 
-                            // Cross Text / Strikethrough Option
+                            // Cross Text / Strikethrough Toggle
                             IconButton(
                                 onClick = { addWordHasStrikeThrough = !addWordHasStrikeThrough },
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(40.dp)
+                                    .height(32.dp)
                                     .background(
                                         if (addWordHasStrikeThrough) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
                                         RoundedCornerShape(8.dp)
@@ -6635,69 +6739,9 @@ fun EditorScreenRemoved(
                                 Icon(
                                     imageVector = Icons.Default.FormatStrikethrough,
                                     contentDescription = "Strikethrough Toggle",
-                                    tint = if (addWordHasStrikeThrough) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                    tint = if (addWordHasStrikeThrough) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
                                 )
-                            }
-
-
-                        }
-
-                        // Outline Border Toggler
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text("Border Outline Around Box:", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                            IconButton(
-                                onClick = { addWordHasOutline = !addWordHasOutline },
-                                modifier = Modifier
-                                    .width(60.dp)
-                                    .height(36.dp)
-                                    .background(
-                                        if (addWordHasOutline) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                                        RoundedCornerShape(8.dp)
-                                    )
-                                    .border(
-                                        width = 1.dp,
-                                        color = if (addWordHasOutline) MaterialTheme.colorScheme.primary else Color.LightGray,
-                                        shape = RoundedCornerShape(8.dp)
-                                    )
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.BorderOuter,
-                                    contentDescription = "Border Outer",
-                                    tint = if (addWordHasOutline) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-
-                        if (addWordHasOutline) {
-                            Text("Border Outline Color:", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                listOf(
-                                    "#000000" to Color.Black,
-                                    "#D62246" to Color(0xFFD62246),
-                                    "#005FB8" to Color(0xFF005FB8),
-                                    "#10AC84" to Color(0xFF10AC84),
-                                    "#F5A623" to Color(0xFFF5A623)
-                                ).forEach { (colorKey, colorVal) ->
-                                    val isSelected = addWordOutlineColorHex.lowercase() == colorKey.lowercase()
-                                    Box(
-                                        modifier = Modifier
-                                            .size(28.dp)
-                                            .background(colorVal, CircleShape)
-                                            .border(
-                                                width = if (isSelected) 3.dp else 1.dp,
-                                                color = if (isSelected) MaterialTheme.colorScheme.primary else Color.LightGray,
-                                                shape = CircleShape
-                                            )
-                                            .clickable { addWordOutlineColorHex = colorKey }
-                                    )
-                                }
                             }
                         }
 
@@ -6716,13 +6760,13 @@ fun EditorScreenRemoved(
                                     onClick = { addWordAlignment = alignKey },
                                     modifier = Modifier
                                         .weight(1f)
-                                        .height(40.dp)
+                                        .height(32.dp)
                                         .background(
                                             if (isSelected) Color.Black else Color.White,
                                             RoundedCornerShape(8.dp)
                                         )
                                         .border(
-                                            width = 2.dp,
+                                            width = 1.dp,
                                             color = Color.Black,
                                             shape = RoundedCornerShape(8.dp)
                                         )
@@ -6731,7 +6775,7 @@ fun EditorScreenRemoved(
                                         imageVector = alignIcon,
                                         contentDescription = "$alignKey alignment",
                                         tint = if (isSelected) Color.White else Color.Black,
-                                        modifier = Modifier.size(20.dp)
+                                        modifier = Modifier.size(18.dp)
                                     )
                                 }
                             }
@@ -6894,7 +6938,7 @@ fun EditorScreenRemoved(
         if (showEditWordDialog && selectedWordToEdit != null) {
             AlertDialog(
                 onDismissRequest = { showEditWordDialog = false },
-                title = { Text("Edit Word / Text Annotation", fontWeight = FontWeight.Bold) },
+                title = { Text("Text Annotation", fontWeight = FontWeight.Bold) },
                 text = {
                     Column(
                         modifier = Modifier.fillMaxWidth(),
@@ -6908,12 +6952,13 @@ fun EditorScreenRemoved(
                             modifier = Modifier.fillMaxWidth()
                         )
 
-                        // Live Interactive Design Preview Card
+                        // Live Interactive Design Preview Card with white background
                         Card(
                             colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f)
+                                containerColor = Color.White
                             ),
                             shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, Color.LightGray),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(vertical = 4.dp)
@@ -6983,11 +7028,11 @@ fun EditorScreenRemoved(
                                     modifier = Modifier.weight(1f).height(36.dp),
                                     contentPadding = PaddingValues(0.dp),
                                     colors = ButtonDefaults.outlinedButtonColors(
-                                        containerColor = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else Color.Transparent
+                                        containerColor = if (isSelected) MaterialTheme.colorScheme.primary else Color(0xFF7F8C8D)
                                     ),
                                     border = BorderStroke(
                                         width = if (isSelected) 2.dp else 1.dp,
-                                        color = if (isSelected) MaterialTheme.colorScheme.primary else Color.LightGray
+                                        color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent
                                     )
                                 ) {
                                     Text(
@@ -6995,7 +7040,7 @@ fun EditorScreenRemoved(
                                         fontSize = 11.sp,
                                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                                         fontFamily = getFontFamily(fontKey),
-                                        color = if (isSelected) MaterialTheme.colorScheme.primary else Color.DarkGray
+                                        color = Color.White
                                     )
                                 }
                             }
@@ -7031,6 +7076,7 @@ fun EditorScreenRemoved(
                         ) {
                             listOf(
                                 "#000000" to Color.Black,
+                                "#FFFFFF" to Color.White,
                                 "#D62246" to Color(0xFFD62246),
                                 "#005FB8" to Color(0xFF005FB8),
                                 "#10AC84" to Color(0xFF10AC84),
@@ -7043,7 +7089,7 @@ fun EditorScreenRemoved(
                                         .background(colorVal, CircleShape)
                                         .border(
                                             width = if (isSelected) 3.dp else 1.dp,
-                                            color = if (isSelected) Color.White else Color.Transparent,
+                                            color = if (isSelected) (if (colorVal == Color.White) Color.Black else Color.White) else Color.LightGray,
                                             shape = CircleShape
                                         )
                                         .clickable { editWordColorHex = colorKey }
@@ -7089,7 +7135,7 @@ fun EditorScreenRemoved(
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(6.dp))
+                        Spacer(modifier = Modifier.height(4.dp))
                         Text("Style & Formatting:", fontSize = 13.sp, fontWeight = FontWeight.Bold)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -7101,7 +7147,7 @@ fun EditorScreenRemoved(
                                 onClick = { editWordIsBold = !editWordIsBold },
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(40.dp)
+                                    .height(32.dp)
                                     .background(
                                         if (editWordIsBold) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
                                         RoundedCornerShape(8.dp)
@@ -7115,7 +7161,8 @@ fun EditorScreenRemoved(
                                 Icon(
                                     imageVector = Icons.Default.FormatBold,
                                     contentDescription = "Bold Toggle",
-                                    tint = if (editWordIsBold) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                    tint = if (editWordIsBold) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
                                 )
                             }
 
@@ -7124,7 +7171,7 @@ fun EditorScreenRemoved(
                                 onClick = { editWordIsItalic = !editWordIsItalic },
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(40.dp)
+                                    .height(32.dp)
                                     .background(
                                         if (editWordIsItalic) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
                                         RoundedCornerShape(8.dp)
@@ -7138,7 +7185,8 @@ fun EditorScreenRemoved(
                                 Icon(
                                     imageVector = Icons.Default.FormatItalic,
                                     contentDescription = "Italic Toggle",
-                                    tint = if (editWordIsItalic) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                    tint = if (editWordIsItalic) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
                                 )
                             }
 
@@ -7147,7 +7195,7 @@ fun EditorScreenRemoved(
                                 onClick = { editWordHasUnderline = !editWordHasUnderline },
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(40.dp)
+                                    .height(32.dp)
                                     .background(
                                         if (editWordHasUnderline) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
                                         RoundedCornerShape(8.dp)
@@ -7161,7 +7209,8 @@ fun EditorScreenRemoved(
                                 Icon(
                                     imageVector = Icons.Default.FormatUnderlined,
                                     contentDescription = "Underline Toggle",
-                                    tint = if (editWordHasUnderline) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                    tint = if (editWordHasUnderline) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
                                 )
                             }
 
@@ -7170,7 +7219,7 @@ fun EditorScreenRemoved(
                                 onClick = { editWordHasStrikeThrough = !editWordHasStrikeThrough },
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(40.dp)
+                                    .height(32.dp)
                                     .background(
                                         if (editWordHasStrikeThrough) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
                                         RoundedCornerShape(8.dp)
@@ -7184,70 +7233,12 @@ fun EditorScreenRemoved(
                                 Icon(
                                     imageVector = Icons.Default.FormatStrikethrough,
                                     contentDescription = "Strikethrough Toggle",
-                                    tint = if (editWordHasStrikeThrough) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                    tint = if (editWordHasStrikeThrough) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
                                 )
                             }
 
 
-                        }
-
-                        // Outline Border Toggler
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text("Border Outline Around Box:", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                            IconButton(
-                                onClick = { editWordHasOutline = !editWordHasOutline },
-                                modifier = Modifier
-                                    .width(60.dp)
-                                    .height(36.dp)
-                                    .background(
-                                        if (editWordHasOutline) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                                        RoundedCornerShape(8.dp)
-                                    )
-                                    .border(
-                                        width = 1.dp,
-                                        color = if (editWordHasOutline) MaterialTheme.colorScheme.primary else Color.LightGray,
-                                        shape = RoundedCornerShape(8.dp)
-                                    )
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.BorderOuter,
-                                    contentDescription = "Border Outer",
-                                    tint = if (editWordHasOutline) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-
-                        if (editWordHasOutline) {
-                            Text("Border Outline Color:", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                listOf(
-                                    "#000000" to Color.Black,
-                                    "#D62246" to Color(0xFFD62246),
-                                    "#005FB8" to Color(0xFF005FB8),
-                                    "#10AC84" to Color(0xFF10AC84),
-                                    "#F5A623" to Color(0xFFF5A623)
-                                ).forEach { (colorKey, colorVal) ->
-                                    val isSelected = editWordOutlineColorHex.lowercase() == colorKey.lowercase()
-                                    Box(
-                                        modifier = Modifier
-                                            .size(28.dp)
-                                            .background(colorVal, CircleShape)
-                                            .border(
-                                                width = if (isSelected) 3.dp else 1.dp,
-                                                color = if (isSelected) MaterialTheme.colorScheme.primary else Color.LightGray,
-                                                shape = CircleShape
-                                            )
-                                            .clickable { editWordOutlineColorHex = colorKey }
-                                    )
-                                }
-                            }
                         }
 
                         Text("Text Alignment:", fontSize = 13.sp, fontWeight = FontWeight.Bold)
@@ -7265,13 +7256,13 @@ fun EditorScreenRemoved(
                                     onClick = { editWordAlignment = alignKey },
                                     modifier = Modifier
                                         .weight(1f)
-                                        .height(40.dp)
+                                        .height(32.dp)
                                         .background(
                                             if (isSelected) Color.Black else Color.White,
                                             RoundedCornerShape(8.dp)
                                         )
                                         .border(
-                                            width = 2.dp,
+                                            width = 1.dp,
                                             color = Color.Black,
                                             shape = RoundedCornerShape(8.dp)
                                         )
@@ -7280,7 +7271,7 @@ fun EditorScreenRemoved(
                                         imageVector = alignIcon,
                                         contentDescription = "$alignKey alignment",
                                         tint = if (isSelected) Color.White else Color.Black,
-                                        modifier = Modifier.size(20.dp)
+                                        modifier = Modifier.size(18.dp)
                                     )
                                 }
                             }
@@ -7461,71 +7452,72 @@ fun EditorScreenRemoved(
                                 }
                             }
                             
-                            // Immersive single page preview
-                            Box(
+                            // Immersive single page preview and navigation controls grouped together
+                            Column(
                                 modifier = Modifier
                                     .weight(1f)
                                     .fillMaxWidth()
                                     .padding(horizontal = 32.dp, vertical = 8.dp),
-                                contentAlignment = Alignment.Center
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
                             ) {
                                 StaticPagePreview(
                                     page = activePage,
                                     state = state,
                                     viewModel = viewModel,
                                     modifier = Modifier
-                                        .fillMaxHeight()
+                                        .weight(1f, fill = false)
                                         .aspectRatio(0.707f)
                                 )
-                            }
-                            
-                            // Immersive status and navigation controls
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(24.dp),
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                IconButton(
-                                    onClick = {
-                                        val activeIdx = pages.indexOf(activePage)
-                                        if (activeIdx > 0) {
-                                            viewModel.setActivePageId(pages[activeIdx - 1].id)
-                                        }
-                                    },
-                                    enabled = pages.indexOf(activePage) > 0,
-                                    modifier = Modifier.background(Color.White.copy(alpha = if (pages.indexOf(activePage) > 0) 0.15f else 0.05f), CircleShape)
-                                ) {
-                                    Icon(Icons.Default.ChevronLeft, "Previous", tint = if (pages.indexOf(activePage) > 0) Color.White else Color.Gray, modifier = Modifier.size(18.dp))
-                                }
                                 
-                                Surface(
-                                    color = Color.Black.copy(alpha = 0.4f),
-                                    shape = RoundedCornerShape(16.dp),
-                                    modifier = Modifier.padding(horizontal = 24.dp)
-                                ) {
-                                    Text(
-                                        text = "PAGE ${pages.indexOf(activePage) + 1} OF ${pages.size}",
-                                        color = Color.White,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-                                        letterSpacing = 0.5.sp
-                                    )
-                                }
+                                Spacer(modifier = Modifier.height(16.dp))
                                 
-                                IconButton(
-                                    onClick = {
-                                        val activeIdx = pages.indexOf(activePage)
-                                        if (activeIdx < pages.size - 1) {
-                                            viewModel.setActivePageId(pages[activeIdx + 1].id)
-                                        }
-                                    },
-                                    enabled = pages.indexOf(activePage) < pages.size - 1,
-                                    modifier = Modifier.background(Color.White.copy(alpha = if (pages.indexOf(activePage) < pages.size - 1) 0.15f else 0.05f), CircleShape)
+                                // Immersive status and navigation controls directly under the page
+                                Row(
+                                    modifier = Modifier.wrapContentSize(),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(Icons.Default.ChevronRight, "Next", tint = if (pages.indexOf(activePage) < pages.size - 1) Color.White else Color.Gray, modifier = Modifier.size(18.dp))
+                                    IconButton(
+                                        onClick = {
+                                            val activeIdx = pages.indexOf(activePage)
+                                            if (activeIdx > 0) {
+                                                viewModel.setActivePageId(pages[activeIdx - 1].id)
+                                            }
+                                        },
+                                        enabled = pages.indexOf(activePage) > 0,
+                                        modifier = Modifier.background(Color.White.copy(alpha = if (pages.indexOf(activePage) > 0) 0.15f else 0.05f), CircleShape)
+                                    ) {
+                                        Icon(Icons.Default.ChevronLeft, "Previous", tint = if (pages.indexOf(activePage) > 0) Color.White else Color.Gray, modifier = Modifier.size(18.dp))
+                                    }
+                                    
+                                    Surface(
+                                        color = Color.Black.copy(alpha = 0.4f),
+                                        shape = RoundedCornerShape(16.dp),
+                                        modifier = Modifier.padding(horizontal = 24.dp)
+                                    ) {
+                                        Text(
+                                            text = "PAGE ${pages.indexOf(activePage) + 1} OF ${pages.size}",
+                                            color = Color.White,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                                            letterSpacing = 0.5.sp
+                                        )
+                                    }
+                                    
+                                    IconButton(
+                                        onClick = {
+                                            val activeIdx = pages.indexOf(activePage)
+                                            if (activeIdx < pages.size - 1) {
+                                                viewModel.setActivePageId(pages[activeIdx + 1].id)
+                                            }
+                                        },
+                                        enabled = pages.indexOf(activePage) < pages.size - 1,
+                                        modifier = Modifier.background(Color.White.copy(alpha = if (pages.indexOf(activePage) < pages.size - 1) 0.15f else 0.05f), CircleShape)
+                                    ) {
+                                        Icon(Icons.Default.ChevronRight, "Next", tint = if (pages.indexOf(activePage) < pages.size - 1) Color.White else Color.Gray, modifier = Modifier.size(18.dp))
+                                    }
                                 }
                             }
                         }
@@ -8420,7 +8412,7 @@ fun RecentsSelectorDialog(
                                     Icon(
                                         imageVector = Icons.Default.PictureAsPdf,
                                         contentDescription = null,
-                                        tint = if (doc.category == "PDF" || doc.category == "Combined PDF") Color.Red else MaterialTheme.colorScheme.primary,
+                                        tint = if (doc.category == "Combine" || doc.category == "PDF" || doc.category == "Combined PDF") Color.Red else MaterialTheme.colorScheme.primary,
                                         modifier = Modifier.size(28.dp)
                                     )
                                     Spacer(modifier = Modifier.width(12.dp))

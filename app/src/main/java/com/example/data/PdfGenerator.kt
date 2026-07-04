@@ -415,22 +415,11 @@ object PdfGenerator {
 
         // Signature vector coordinates are formatted as normalized coords inside signature builder workspace (0..1)
         // Draw the path translated to signature bounds (x, y, w, h)
-        val path = Path()
-        val start = points.first()
-        path.moveTo(x + start.x * w, y + start.y * h)
-        for (i in 1 until points.size) {
-            val pt = points[i]
-            // Draw path lines
-            if (pt.x == -1f && pt.y == -1f) {
-                // Liftoff/New path start (we represent lift with a placeholder coordinate pair (-1, -1) to split strokes nicely)
-                if (i + 1 < points.size) {
-                    val nextPt = points[i + 1]
-                    path.moveTo(x + nextPt.x * w, y + nextPt.y * h)
-                }
-            } else {
-                path.lineTo(x + pt.x * w, y + pt.y * h)
-            }
+        val smoothed = DocumentSerializer.let {
+            com.example.data.SignaturePathUtils.buildSmoothedPath(points, w, h)
         }
-        canvas.drawPath(path, sigPaint)
+        // Translate into place since buildSmoothedPath assumes an origin of (0,0)
+        smoothed.offset(x, y)
+        canvas.drawPath(smoothed, sigPaint)
     }
 }
