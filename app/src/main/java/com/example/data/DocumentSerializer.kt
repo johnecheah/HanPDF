@@ -38,7 +38,8 @@ data class TextAnnotationDef(
     val alignment: String = "left", // "left", "center", "right"
     val isPowerOf: Boolean = false,
     val isItalic: Boolean = false,
-    val hasStrikeThrough: Boolean = false
+    val hasStrikeThrough: Boolean = false,
+    val rotation: Float = 0f
 )
 
 data class SignatureOverlayDef(

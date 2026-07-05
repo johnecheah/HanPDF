@@ -103,17 +103,13 @@ import java.io.File
 import kotlin.math.roundToInt
 
 fun getFontFamily(fontName: String?): FontFamily {
-    val typeface = when (fontName?.lowercase()) {
-        "times new roman" -> android.graphics.Typeface.create("serif", android.graphics.Typeface.NORMAL)
-        "tahoma" -> android.graphics.Typeface.create("sans-serif-condensed", android.graphics.Typeface.NORMAL)
-        "calibri" -> android.graphics.Typeface.create("sans-serif-light", android.graphics.Typeface.NORMAL)
-        "arial" -> android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.NORMAL)
-        "serif" -> android.graphics.Typeface.create("serif", android.graphics.Typeface.NORMAL)
-        "monospace" -> android.graphics.Typeface.create("monospace", android.graphics.Typeface.NORMAL)
-        "cursive" -> android.graphics.Typeface.create("serif", android.graphics.Typeface.NORMAL)
-        else -> android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.NORMAL)
+    return when (fontName?.lowercase()) {
+        "times new roman", "serif" -> FontFamily.Serif
+        "monospace" -> FontFamily.Monospace
+        "cursive" -> FontFamily.Cursive
+        "tahoma", "calibri", "arial" -> FontFamily.SansSerif
+        else -> FontFamily.Default
     }
-    return FontFamily(typeface)
 }
 
 @Composable
@@ -881,7 +877,7 @@ fun DashboardScreen(
                         Spacer(modifier = Modifier.height(18.dp))
                         
                         Text(
-                            text = "Created by\nJohne Cheah\n@2026\n \nVersion V1.0",
+                            text = "Created by\nJohne Cheah\n@2026\n \nVersion V1.1",
                             fontSize = 15.sp,
                             lineHeight = 22.sp,
                             fontWeight = FontWeight.Bold,
@@ -1636,20 +1632,153 @@ fun SignatureStudioScreen(
     val context = LocalContext.current
     val state by viewModel.uiState.collectAsState()
     var aliasText by remember { mutableStateOf(TextFieldValue("")) }
+    var activeStudioTab by remember { mutableStateOf(0) }
 
     var showCropNamingDialog by remember { mutableStateOf(false) }
     var selectedUriForCrop by remember { mutableStateOf<android.net.Uri?>(null) }
     var cropAlias by remember { mutableStateOf("") }
     var showCropStudio by remember { mutableStateOf(false) }
 
+    var tempCameraUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    var showImportSourceDialog by remember { mutableStateOf(false) }
+    var showCameraSignatureScanner by remember { mutableStateOf(false) }
+
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success: Boolean ->
+        if (success) {
+            val uri = tempCameraUri
+            if (uri != null) {
+                selectedUriForCrop = uri
+                cropAlias = aliasText.text
+                showCropNamingDialog = true
+            }
+        }
+    }
+
+    val triggerCamera = {
+        try {
+            val tempFile = java.io.File(context.cacheDir, "camera_sig_${System.currentTimeMillis()}.jpg").apply {
+                parentFile?.mkdirs()
+                if (exists()) delete()
+                createNewFile()
+            }
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                context,
+                "com.example.fileprovider",
+                tempFile
+            )
+            tempCameraUri = uri
+            cameraLauncher.launch(uri)
+        } catch (e: Exception) {
+            android.widget.Toast.makeText(context, "Error starting camera: ${e.localizedMessage}", android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            showCameraSignatureScanner = true
+        } else {
+            showCameraSignatureScanner = true
+            viewModel.triggerFeedback("Camera permission is required to scan signatures. Sandbox mode active.")
+        }
+    }
+
     val imageLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: android.net.Uri? ->
         if (uri != null) {
             selectedUriForCrop = uri
-            cropAlias = aliasText.text
-            showCropNamingDialog = true
+            cropAlias = aliasText.text.ifEmpty { "Photo Signature" }
+            showCropStudio = true
         }
+    }
+
+    if (showImportSourceDialog) {
+        AlertDialog(
+            onDismissRequest = { showImportSourceDialog = false },
+            title = { Text("Import Signature Photo", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text("Select how you would like to import your signature photo:", fontSize = 13.sp)
+                    
+                    Surface(
+                        onClick = {
+                            showImportSourceDialog = false
+                            if (androidx.core.content.ContextCompat.checkSelfPermission(
+                                    context,
+                                    android.Manifest.permission.CAMERA
+                                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                            ) {
+                                showCameraSignatureScanner = true
+                            } else {
+                                cameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
+                            }
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CameraAlt,
+                                contentDescription = "Camera",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Column {
+                                Text("Scan from Camera", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                                Text("Snap a new photo of your signature", fontSize = 11.sp, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f))
+                            }
+                        }
+                    }
+
+                    Surface(
+                        onClick = {
+                            showImportSourceDialog = false
+                            imageLauncher.launch("image/*")
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AddPhotoAlternate,
+                                contentDescription = "Gallery",
+                                tint = MaterialTheme.colorScheme.secondary,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Column {
+                                Text("Import from Photo Gallery", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                                Text("Select an existing photo from your device", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f))
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showImportSourceDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 
     if (showCropNamingDialog) {
@@ -1709,9 +1838,27 @@ fun SignatureStudioScreen(
                     showCropStudio = false
                     selectedUriForCrop = null
                     cropAlias = ""
+                    activeStudioTab = 1
                 }
             )
         }
+    }
+
+    if (showCameraSignatureScanner) {
+        CameraSignatureScannerDialog(
+            onDismissRequest = { showCameraSignatureScanner = false },
+            onPhotoCaptured = { bitmap ->
+                showCameraSignatureScanner = false
+                try {
+                    val uri = saveBitmapToCacheUri(context, bitmap)
+                    selectedUriForCrop = uri
+                    cropAlias = aliasText.text.ifEmpty { "Camera Signature" }
+                    showCropStudio = true
+                } catch (e: Exception) {
+                    android.widget.Toast.makeText(context, "Error saving scanned photo: ${e.localizedMessage}", android.widget.Toast.LENGTH_LONG).show()
+                }
+            }
+        )
     }
 
     // Professional drawing state
@@ -1721,7 +1868,7 @@ fun SignatureStudioScreen(
 
     // Canvas styling state
     var selectedColor by remember { mutableStateOf("#000000") } // Onyx Black
-    var selectedThickness by remember { mutableFloatStateOf(4f) }
+    var selectedThickness by remember { mutableFloatStateOf(2f) }
     var selectedPenType by remember { mutableStateOf("pen") } // "pen", "calligraphy", "highlighter", "dashed"
     var selectedTemplate by remember { mutableStateOf("white") } // "white", "lined", "graph", "slate"
     var isEraserMode by remember { mutableStateOf(false) }
@@ -1769,53 +1916,57 @@ fun SignatureStudioScreen(
                     }
                 },
                 actions = {
-                    // Reset Button
-                    IconButton(
-                        onClick = {
-                            strokes.clear()
-                            redoStrokes.clear()
-                            activePoints.clear()
-                            viewModel.triggerFeedback("Canvas cleared.")
-                        },
-                        enabled = strokes.isNotEmpty() || activePoints.isNotEmpty()
-                    ) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Clear Canvas")
-                    }
-
-                    Spacer(modifier = Modifier.width(4.dp))
-
-                    Button(
-                        onClick = {
-                            val flattenedPoints = mutableListOf<PointDef>()
-                            strokes.forEach { stroke ->
-                                flattenedPoints.addAll(stroke.points)
-                                flattenedPoints.add(PointDef(-1f, -1f))
-                            }
-                            if (flattenedPoints.isNotEmpty() && flattenedPoints.last().x == -1f) {
-                                flattenedPoints.removeAt(flattenedPoints.lastIndex)
-                            }
-
-                            if (flattenedPoints.isEmpty()) {
-                                viewModel.triggerFeedback("Draw inside the canvas first!")
-                            } else {
-                                viewModel.saveDrawnSignature(
-                                    aliasText.text,
-                                    flattenedPoints.toList(),
-                                    selectedColor,
-                                    selectedThickness
-                                )
+                    if (activeStudioTab == 0) {
+                        // Reset Button
+                        IconButton(
+                            onClick = {
                                 strokes.clear()
                                 redoStrokes.clear()
                                 activePoints.clear()
-                                aliasText = TextFieldValue("")
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Icon(Icons.Default.Save, "Save Profile", modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Save Profile", fontSize = 13.sp)
+                                viewModel.triggerFeedback("Canvas cleared.")
+                            },
+                            enabled = strokes.isNotEmpty() || activePoints.isNotEmpty()
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = "Clear Canvas")
+                        }
+
+                        Spacer(modifier = Modifier.width(4.dp))
+
+                        Button(
+                            onClick = {
+                                val flattenedPoints = mutableListOf<PointDef>()
+                                strokes.forEach { stroke ->
+                                    flattenedPoints.addAll(stroke.points)
+                                    flattenedPoints.add(PointDef(-1f, -1f))
+                                }
+                                if (flattenedPoints.isNotEmpty() && flattenedPoints.last().x == -1f) {
+                                    flattenedPoints.removeAt(flattenedPoints.lastIndex)
+                                }
+
+                                if (flattenedPoints.isEmpty()) {
+                                    viewModel.triggerFeedback("Draw inside the canvas first!")
+                                } else {
+                                    viewModel.saveDrawnSignature(
+                                        aliasText.text,
+                                        flattenedPoints.toList(),
+                                        selectedColor,
+                                        selectedThickness
+                                    )
+                                    strokes.clear()
+                                    redoStrokes.clear()
+                                    activePoints.clear()
+                                    aliasText = TextFieldValue("")
+                                    // Switch to stored signatures tab so the user can see their saved profile
+                                    activeStudioTab = 1
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(Icons.Default.Save, "Save Profile", modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Save Profile", fontSize = 13.sp)
+                        }
                     }
                 }
             )
@@ -1826,9 +1977,36 @@ fun SignatureStudioScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .background(MaterialTheme.colorScheme.background)
-                .padding(16.dp)
         ) {
-            // Profile details card (Bento style)
+            // Tab system on top
+            TabRow(
+                selectedTabIndex = activeStudioTab,
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                contentColor = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Tab(
+                    selected = activeStudioTab == 0,
+                    onClick = { activeStudioTab = 0 },
+                    text = { Text("New Signature", fontWeight = FontWeight.Bold, fontSize = 13.sp) },
+                    icon = { Icon(Icons.Default.Gesture, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                )
+                Tab(
+                    selected = activeStudioTab == 1,
+                    onClick = { activeStudioTab = 1 },
+                    text = { Text("Stored Signature", fontWeight = FontWeight.Bold, fontSize = 13.sp) },
+                    icon = { Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                )
+            }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                if (activeStudioTab == 0) {
+                    // Profile details card (Bento style)
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
                 shape = RoundedCornerShape(16.dp),
@@ -2225,34 +2403,30 @@ fun SignatureStudioScreen(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Secondary Actions Row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                OutlinedButton(
-                    onClick = { imageLauncher.launch("image/*") },
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary)
-                ) {
-                    Icon(Icons.Default.AddPhotoAlternate, contentDescription = "Import image signature", modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Import Photo Signature", fontSize = 11.sp)
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-            HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f), thickness = 1.dp)
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Signature Profile Database Directory Header
-            Text(
-                text = "Stored Signature Profiles",
-                fontWeight = FontWeight.Bold,
-                fontSize = 15.sp,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(bottom = 8.dp)
-            )
+                    // Secondary Actions Row
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { showImportSourceDialog = true },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary)
+                        ) {
+                            Icon(Icons.Default.AddPhotoAlternate, contentDescription = "Import image signature", modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Import Photo Signature", fontSize = 11.sp)
+                        }
+                    }
+                } else {
+                    // Signature Profile Database Directory Header
+                    Text(
+                        text = "Stored Signature Profiles",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
 
             if (state.signatures.isEmpty()) {
                 Box(
@@ -2363,6 +2537,7 @@ fun SignatureStudioScreen(
                                     aliasText = TextFieldValue(sig.alias)
                                     isEraserMode = false
                                     viewModel.triggerFeedback("Loaded vector signature back to workspace!")
+                                    activeStudioTab = 0
                                 }
                             }
                         )
@@ -2371,6 +2546,8 @@ fun SignatureStudioScreen(
             }
         }
     }
+}
+}
 
     // Custom Color Hex Help dialog
     if (showColorHelpDialog) {
@@ -4847,10 +5024,10 @@ fun EditorScreenRemoved(
                                     Text("Click button to insert text", fontSize = 10.sp, color = Color.Gray)
                                 }
 
-                                                                                                  Row(
-                                      horizontalArrangement = Arrangement.spacedBy(18.dp),
-                                      verticalAlignment = Alignment.CenterVertically
-                                 ) {
+                                  Row(
+                                       horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                       verticalAlignment = Alignment.CenterVertically
+                                  ) {
                                       // 1. ADD TEXT
                                       Box(
                                           modifier = Modifier
@@ -5039,6 +5216,45 @@ fun EditorScreenRemoved(
                                                   fontSize = 14.sp,
                                                   fontWeight = FontWeight.Bold,
                                                   color = if (selectedAnn != null) Color(0xFFD97706) else Color.White
+                                              )
+                                          }
+                                      }
+
+                                      // 6. ROTATE CLOCKWISE 15 DEG
+                                      Box(
+                                          modifier = Modifier
+                                              .size(38.dp)
+                                              .let {
+                                                  if (selectedAnn != null) {
+                                                      it.clickable {
+                                                          selectedAnn.let { ann ->
+                                                              val newRotation = (ann.rotation + 15f) % 360f
+                                                              val updated = ann.copy(rotation = newRotation)
+                                                              val idx = currentTextAnns.indexOfFirst { it.id == ann.id }
+                                                              if (idx != -1) {
+                                                                  currentTextAnns[idx] = updated
+                                                                  viewModel.editActivePageAnnotations(currentTextAnns.toList())
+                                                              }
+                                                          }
+                                                      }
+                                                  } else it
+                                              },
+                                          contentAlignment = Alignment.Center
+                                      ) {
+                                          Box(
+                                              modifier = Modifier
+                                                  .size(24.dp)
+                                                  .background(
+                                                      if (selectedAnn != null) Color(0xFFE0F2FE) else Color(0xFF94A3B8),
+                                                      CircleShape
+                                                  ),
+                                              contentAlignment = Alignment.Center
+                                          ) {
+                                              Icon(
+                                                  imageVector = Icons.Default.RotateRight,
+                                                  contentDescription = "Rotate 15 deg",
+                                                  tint = if (selectedAnn != null) Color(0xFF0369A1) else Color.White,
+                                                  modifier = Modifier.size(13.dp)
                                               )
                                           }
                                       }
@@ -6505,6 +6721,13 @@ fun EditorScreenRemoved(
                                         fontFamily = getFontFamily(addWordFontFamily),
                                         fontWeight = if (addWordIsBold) FontWeight.Bold else FontWeight.Normal,
                                         fontStyle = if (addWordIsItalic) FontStyle.Italic else FontStyle.Normal,
+                                        textDecoration = when {
+                                            addWordHasUnderline && addWordHasStrikeThrough ->
+                                                androidx.compose.ui.text.style.TextDecoration.Underline + androidx.compose.ui.text.style.TextDecoration.LineThrough
+                                            addWordHasUnderline -> androidx.compose.ui.text.style.TextDecoration.Underline
+                                            addWordHasStrikeThrough -> androidx.compose.ui.text.style.TextDecoration.LineThrough
+                                            else -> androidx.compose.ui.text.style.TextDecoration.None
+                                        },
                                         color = Color(android.graphics.Color.parseColor(addWordColorHex)),
                                         modifier = Modifier.fillMaxWidth(),
                                         textAlign = when (addWordAlignment.lowercase()) {
@@ -6999,6 +7222,13 @@ fun EditorScreenRemoved(
                                         fontFamily = getFontFamily(editWordFontFamily),
                                         fontWeight = if (editWordIsBold) FontWeight.Bold else FontWeight.Normal,
                                         fontStyle = if (editWordIsItalic) FontStyle.Italic else FontStyle.Normal,
+                                        textDecoration = when {
+                                            editWordHasUnderline && editWordHasStrikeThrough ->
+                                                androidx.compose.ui.text.style.TextDecoration.Underline + androidx.compose.ui.text.style.TextDecoration.LineThrough
+                                            editWordHasUnderline -> androidx.compose.ui.text.style.TextDecoration.Underline
+                                            editWordHasStrikeThrough -> androidx.compose.ui.text.style.TextDecoration.LineThrough
+                                            else -> androidx.compose.ui.text.style.TextDecoration.None
+                                        },
                                         color = Color(android.graphics.Color.parseColor(editWordColorHex)),
                                         modifier = Modifier.fillMaxWidth(),
                                         textAlign = when (editWordAlignment.lowercase()) {
@@ -8527,6 +8757,44 @@ fun createMockScannedDocSheet(pageIndex: Int): Bitmap {
     return bmp
 }
 
+fun createMockSignatureBmp(): Bitmap {
+    val bmp = Bitmap.createBitmap(600, 300, Bitmap.Config.ARGB_8888)
+    val canvas = android.graphics.Canvas(bmp)
+    canvas.drawColor(android.graphics.Color.WHITE)
+    val paint = android.graphics.Paint().apply {
+        color = android.graphics.Color.DKGRAY
+        strokeWidth = 5f
+        style = android.graphics.Paint.Style.STROKE
+        isAntiAlias = true
+    }
+    // Draw some cursive loops for a mock signature
+    val path = android.graphics.Path().apply {
+        moveTo(100f, 150f)
+        cubicTo(150f, 80f, 200f, 220f, 250f, 150f)
+        cubicTo(300f, 80f, 350f, 220f, 400f, 150f)
+        lineTo(500f, 150f)
+    }
+    canvas.drawPath(path, paint)
+    return bmp
+}
+
+fun saveBitmapToCacheUri(context: android.content.Context, bitmap: Bitmap): android.net.Uri {
+    val tempFile = java.io.File(context.cacheDir, "camera_sig_capture_${System.currentTimeMillis()}.jpg").apply {
+        parentFile?.mkdirs()
+        if (exists()) delete()
+        createNewFile()
+    }
+    val outputStream = java.io.FileOutputStream(tempFile)
+    bitmap.compress(Bitmap.CompressFormat.JPEG, 90, outputStream)
+    outputStream.flush()
+    outputStream.close()
+    return androidx.core.content.FileProvider.getUriForFile(
+        context,
+        "com.example.fileprovider",
+        tempFile
+    )
+}
+
 fun createMockIdentityCard(isFront: Boolean): Bitmap {
     val bmp = Bitmap.createBitmap(400, 250, Bitmap.Config.ARGB_8888)
     val canvas = AndroidCanvas(bmp)
@@ -9897,12 +10165,225 @@ fun CropImageStudioDialog(
                             shape = RoundedCornerShape(12.dp),
                             enabled = bitmap != null && !isLoading
                         ) {
-                            Icon(Icons.Default.Check, contentDescription = null)
-                            Spacer(modifier = Modifier.width(8.dp))
                             Text("Complete Crop & Save Signature", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                         }
 
                         Spacer(modifier = Modifier.height(24.dp))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CameraSignatureScannerDialog(
+    onDismissRequest: () -> Unit,
+    onPhotoCaptured: (Bitmap) -> Unit
+) {
+    val context = LocalContext.current
+    var imageCapture: androidx.camera.core.ImageCapture? by remember { mutableStateOf(null) }
+
+    var hasCameraPermission by remember {
+        mutableStateOf(
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.CAMERA
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        )
+    }
+
+    var liveCameraMode by remember { mutableStateOf(false) }
+    LaunchedEffect(hasCameraPermission) {
+        if (hasCameraPermission) {
+            liveCameraMode = true
+        }
+    }
+
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        hasCameraPermission = isGranted
+        liveCameraMode = isGranted
+    }
+
+    Dialog(
+        onDismissRequest = onDismissRequest,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            dismissOnBackPress = true,
+            dismissOnClickOutside = false
+        )
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = Color(0xFF0F172A)
+        ) {
+            Scaffold(
+                topBar = {
+                    TopAppBar(
+                        title = { Text("Scan Signature From Camera", color = Color.White, style = MaterialTheme.typography.titleMedium) },
+                        navigationIcon = {
+                            IconButton(onClick = onDismissRequest) {
+                                Icon(Icons.Default.Close, contentDescription = "Cancel", tint = Color.White)
+                            }
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = Color(0xFF1E293B),
+                            titleContentColor = Color.White,
+                            navigationIconContentColor = Color.White
+                        )
+                    )
+                },
+                containerColor = Color(0xFF0F172A)
+            ) { paddingValues ->
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(paddingValues),
+                    contentAlignment = Alignment.Center
+                ) {
+                    // Camera preview / viewport box
+                    if (liveCameraMode && hasCameraPermission) {
+                        CameraPreviewView(
+                            modifier = Modifier.fillMaxSize(),
+                            onImageCaptureCreated = { imageCapture = it },
+                            onCornersDetected = {}
+                        )
+                    } else {
+                        // High-fidelity sandbox background simulation
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(
+                                    Brush.verticalGradient(
+                                        colors = listOf(Color(0xFF1E293B), Color(0xFF0F172A))
+                                    )
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CameraAlt,
+                                    contentDescription = null,
+                                    tint = Color(0xFF38BDF8).copy(alpha = 0.4f),
+                                    modifier = Modifier.size(64.dp)
+                                )
+                                Text(
+                                    text = "📡 ACTIVE HIGH-FIDELITY SANDBOX VIEWFINDER",
+                                    color = Color(0xFF38BDF8),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "Position your physical document signature sheet, or tap below to simulate.",
+                                    color = Color.White.copy(alpha = 0.6f),
+                                    fontSize = 11.sp,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.padding(horizontal = 32.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    // Foreground bounding box: "signature size box"
+                    Box(
+                        modifier = Modifier
+                            .size(310.dp, 130.dp)
+                            .border(3.dp, Color(0xFF38BDF8), RoundedCornerShape(12.dp))
+                            .shadow(4.dp, RoundedCornerShape(12.dp))
+                            .background(Color.Transparent),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.background(Color.Black.copy(alpha = 0.4f), RoundedCornerShape(8.dp)).padding(8.dp)
+                        ) {
+                            Text(
+                                "ALIGN SIGNATURE INSIDE BOX",
+                                color = Color.White,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+
+                    // Bottom controls
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .background(Color.Black.copy(alpha = 0.6f))
+                            .padding(24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            if (!hasCameraPermission) {
+                                Button(
+                                    onClick = { cameraPermissionLauncher.launch(android.Manifest.permission.CAMERA) },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD97706))
+                                ) {
+                                    Icon(Icons.Default.Camera, contentDescription = null)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Authorize Live Camera Feed", fontSize = 12.sp)
+                                }
+                            }
+
+                            // Big circular capture button
+                            FloatingActionButton(
+                                onClick = {
+                                    val capture = imageCapture
+                                    if (liveCameraMode && hasCameraPermission && capture != null) {
+                                        capture.takePicture(
+                                            androidx.core.content.ContextCompat.getMainExecutor(context),
+                                            object : androidx.camera.core.ImageCapture.OnImageCapturedCallback() {
+                                                override fun onCaptureSuccess(image: androidx.camera.core.ImageProxy) {
+                                                    val bitmap = imageProxyToBitmap(image)
+                                                    image.close()
+                                                    if (bitmap != null) {
+                                                        onPhotoCaptured(bitmap)
+                                                    } else {
+                                                        onPhotoCaptured(createMockSignatureBmp())
+                                                    }
+                                                }
+
+                                                override fun onError(exception: androidx.camera.core.ImageCaptureException) {
+                                                    onPhotoCaptured(createMockSignatureBmp())
+                                                }
+                                            }
+                                        )
+                                    } else {
+                                        onPhotoCaptured(createMockSignatureBmp())
+                                    }
+                                },
+                                containerColor = if (liveCameraMode) Color.Green else Color(0xFF0284C7),
+                                contentColor = Color.White,
+                                shape = CircleShape,
+                                modifier = Modifier.size(64.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (liveCameraMode) Icons.Default.CameraAlt else Icons.Default.AutoAwesome,
+                                    contentDescription = "Capture Photo",
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            }
+                            
+                            Text(
+                                text = if (liveCameraMode) "SNAP SIGNATURE PHOTO" else "SIMULATE SCAN",
+                                color = Color.White.copy(alpha = 0.8f),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
             }

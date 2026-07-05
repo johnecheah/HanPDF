@@ -124,6 +124,7 @@ class AdvancedTextAnnotationView @JvmOverloads constructor(
         val h = max(lastBounds.height().toInt(), 30)
         translationX = def.x * refWidthPx + lastBounds.left
         translationY = def.y * refHeightPx + lastBounds.top
+        rotation = def.rotation
         layoutParams?.let { lp ->
             if (lp.width != w || lp.height != h) { lp.width = w; lp.height = h; layoutParams = lp }
         }
@@ -247,7 +248,7 @@ class AdvancedTextAnnotationView @JvmOverloads constructor(
         super.onDraw(canvas)
 
         if (!isEditing) {
-            TextAnnotationRenderer.draw(canvas, def, -lastBounds.left, -lastBounds.top, refWidthPx, isMainContent)
+            TextAnnotationRenderer.draw(canvas, def.copy(rotation = 0f), -lastBounds.left, -lastBounds.top, refWidthPx, isMainContent)
         }
 
         if (isSelectedState) {

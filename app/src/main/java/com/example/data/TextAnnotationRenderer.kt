@@ -126,6 +126,12 @@ object TextAnnotationRenderer {
         val baseRx = originX
         val ry = originY - m.ascent - m.powerShift
 
+        val hasRotation = textDef.rotation != 0f
+        if (hasRotation) {
+            canvas.save()
+            canvas.rotate(textDef.rotation, bounds.centerX(), bounds.centerY())
+        }
+
         if (textDef.bgColorHex.isNotEmpty() && textDef.bgColorHex.lowercase() != "transparent") {
             try {
                 val bgPaint = Paint().apply { color = Color.parseColor(textDef.bgColorHex); style = Paint.Style.FILL }
@@ -156,24 +162,37 @@ object TextAnnotationRenderer {
 
             if (textDef.hasUnderline) {
                 try {
+                    val scaleFactor = refWidthPx / 400f
+                    val lineThickness = (2.5f * scaleFactor).coerceAtLeast(2.5f)
+                    val underlineOffset = (4f * scaleFactor).coerceAtLeast(4f)
                     val underlinePaint = Paint().apply {
-                        color = Color.parseColor(textDef.colorHex); style = Paint.Style.STROKE; strokeWidth = 1.5f
+                        color = Color.parseColor(textDef.colorHex)
+                        style = Paint.Style.STROKE
+                        strokeWidth = lineThickness
                     }
-                    canvas.drawLine(lineRxStart, lineY + 3f, lineRxEnd, lineY + 3f, underlinePaint)
+                    canvas.drawLine(lineRxStart, lineY + underlineOffset, lineRxEnd, lineY + underlineOffset, underlinePaint)
                 } catch (e: Exception) { }
             }
 
             if (textDef.hasStrikeThrough) {
                 try {
+                    val scaleFactor = refWidthPx / 400f
+                    val lineThickness = (2.5f * scaleFactor).coerceAtLeast(2.5f)
                     val middleY = lineY + (m.ascent + m.descent) / 2f
                     val strikePaint = Paint().apply {
-                        color = Color.parseColor(textDef.colorHex); style = Paint.Style.STROKE; strokeWidth = 1.5f
+                        color = Color.parseColor(textDef.colorHex)
+                        style = Paint.Style.STROKE
+                        strokeWidth = lineThickness
                     }
                     canvas.drawLine(lineRxStart, middleY, lineRxEnd, middleY, strikePaint)
                 } catch (e: Exception) { }
             }
 
             canvas.drawText(lineText, baseRx, lineY, textPaint)
+        }
+
+        if (hasRotation) {
+            canvas.restore()
         }
 
         return bounds

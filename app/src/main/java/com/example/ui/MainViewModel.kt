@@ -717,122 +717,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 // Draw text layer annotations
                 for (textDef in page.textAnnotations) {
-                    val sizeRatio = if (textDef.isPowerOf) 0.72f else 1.0f
-                    val textPaint = android.graphics.Paint().apply {
-                        color = android.graphics.Color.parseColor(textDef.colorHex)
-                        textSize = (textDef.fontSize * sizeRatio) * (curW / 400f)
-                        val fontStyle = if (textDef.isBold) {
-                            if (textDef.isItalic || textDef.fontName.lowercase() == "cursive") android.graphics.Typeface.BOLD_ITALIC else android.graphics.Typeface.BOLD
-                        } else {
-                            if (textDef.isItalic || textDef.fontName.lowercase() == "cursive") android.graphics.Typeface.ITALIC else android.graphics.Typeface.NORMAL
-                        }
-                        val fontTypeface = when (textDef.fontName.lowercase()) {
-                            "serif" -> android.graphics.Typeface.create(android.graphics.Typeface.SERIF, fontStyle)
-                            "monospace" -> android.graphics.Typeface.create(android.graphics.Typeface.MONOSPACE, fontStyle)
-                            "cursive" -> android.graphics.Typeface.create("serif", fontStyle)
-                            else -> android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, fontStyle)
-                        }
-                        typeface = fontTypeface
-                        val paintAlign = when (textDef.alignment.lowercase()) {
-                            "center" -> android.graphics.Paint.Align.CENTER
-                            "right" -> android.graphics.Paint.Align.RIGHT
-                            else -> android.graphics.Paint.Align.LEFT
-                        }
-                        textAlign = paintAlign
-                        isAntiAlias = true
-                    }
-                    
-                    val lines = textDef.text.split("\n")
-                    val fontMetrics = textPaint.fontMetrics
-                    val lineHeight = fontMetrics.descent - fontMetrics.ascent
-                    val maxLineWidth = lines.map { textPaint.measureText(it) }.maxOrNull() ?: 0f
-
-                    val baseRx = textDef.x * curW
-                    val rawY = textDef.y * curH
-                    val fontMetricsTemp = android.graphics.Paint().apply { textSize = textDef.fontSize * (curW / 400f) }.fontMetrics
-                    val powerShift = if (textDef.isPowerOf) (fontMetricsTemp.descent - fontMetricsTemp.ascent) * 0.45f else 0f
-                    val ry = rawY - fontMetrics.ascent - powerShift
-                    val rxStart = when (textPaint.textAlign) {
-                        android.graphics.Paint.Align.CENTER -> baseRx - maxLineWidth / 2f
-                        android.graphics.Paint.Align.RIGHT -> baseRx - maxLineWidth
-                        else -> baseRx
-                    }
-                    val rxEnd = rxStart + maxLineWidth
-
-                    val pdfPadding = 0f
-                    val rectLeft = rxStart - pdfPadding
-                    val rectTop = ry + fontMetrics.ascent - pdfPadding
-                    val rectRight = rxEnd + pdfPadding
-                    val rectBottom = ry + (lines.size - 1) * lineHeight + fontMetrics.descent + pdfPadding
-
-                    if (textDef.bgColorHex.isNotEmpty() && textDef.bgColorHex.lowercase() != "transparent") {
-                        try {
-                            val bgPaint = android.graphics.Paint().apply {
-                                color = android.graphics.Color.parseColor(textDef.bgColorHex)
-                                style = android.graphics.Paint.Style.FILL
-                            }
-                            canvas.drawRect(
-                                rectLeft,
-                                rectTop,
-                                rectRight,
-                                rectBottom,
-                                bgPaint
-                            )
-                        } catch (e: Exception) { e.printStackTrace() }
-                    }
-
-                    if (textDef.hasOutline) {
-                        try {
-                            val outlinePaint = android.graphics.Paint().apply {
-                                color = android.graphics.Color.parseColor(textDef.outlineColorHex)
-                                style = android.graphics.Paint.Style.STROKE
-                                strokeWidth = 2f
-                            }
-                            canvas.drawRect(
-                                rectLeft,
-                                rectTop,
-                                rectRight,
-                                rectBottom,
-                                outlinePaint
-                            )
-                        } catch (e: Exception) { e.printStackTrace() }
-                    }
-
-                    for ((lineIdx, lineText) in lines.withIndex()) {
-                        val lineY = ry + lineIdx * lineHeight
-                        val lineWidth = textPaint.measureText(lineText)
-                        val lineRxStart = when (textPaint.textAlign) {
-                            android.graphics.Paint.Align.CENTER -> baseRx - lineWidth / 2f
-                            android.graphics.Paint.Align.RIGHT -> baseRx - lineWidth
-                            else -> baseRx
-                        }
-                        val lineRxEnd = lineRxStart + lineWidth
-
-                        if (textDef.hasUnderline) {
-                            try {
-                                val underlinePaint = android.graphics.Paint().apply {
-                                    color = android.graphics.Color.parseColor(textDef.colorHex)
-                                    style = android.graphics.Paint.Style.STROKE
-                                    strokeWidth = 1.5f
-                                }
-                                canvas.drawLine(lineRxStart, lineY + 3f, lineRxEnd, lineY + 3f, underlinePaint)
-                            } catch (e: Exception) { e.printStackTrace() }
-                        }
-
-                        if (textDef.hasStrikeThrough) {
-                            try {
-                                val middleY = lineY + (fontMetrics.ascent + fontMetrics.descent) / 2f
-                                val strikePaint = android.graphics.Paint().apply {
-                                    color = android.graphics.Color.parseColor(textDef.colorHex)
-                                    style = android.graphics.Paint.Style.STROKE
-                                    strokeWidth = 1.5f
-                                }
-                                canvas.drawLine(lineRxStart, middleY, lineRxEnd, middleY, strikePaint)
-                            } catch (e: Exception) { e.printStackTrace() }
-                        }
-
-                        canvas.drawText(lineText, baseRx, lineY, textPaint)
-                    }
+                    com.example.data.TextAnnotationRenderer.draw(
+                        canvas = canvas,
+                        textDef = textDef,
+                        originX = textDef.x * curW,
+                        originY = textDef.y * curH,
+                        refWidthPx = curW.toFloat(),
+                        isMainContent = textDef.id == "word_main_content"
+                    )
                 }
 
                 // Draw signatures
