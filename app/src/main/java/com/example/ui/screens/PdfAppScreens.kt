@@ -9195,8 +9195,8 @@ fun IdScanEditScreen(
                 ) {
                     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
                         val scale = maxWidth / 210f
-                        val cardWidthDp = scale * 86f
-                        val cardHeightDp = scale * 54f
+                        val cardWidthDp = scale * 86f * 1.3f
+                        val cardHeightDp = scale * 54f * 1.3f
 
                         Column(
                             modifier = Modifier.fillMaxSize(),

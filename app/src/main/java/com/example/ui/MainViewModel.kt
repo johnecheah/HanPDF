@@ -1733,11 +1733,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
 
-            // Scale to physical 86mm x 54mm on A4 sheet
+            // Scale to physical 86mm x 54mm on A4 sheet, increased by 30% as requested
             val scaleX = canvasWidth.toFloat() / 210f
             val scaleY = canvasHeight.toFloat() / 297f
-            val cardWidth = (86f * scaleX).toInt()
-            val cardHeight = (54f * scaleY).toInt()
+            val cardWidth = (86f * scaleX * 1.3f).toInt()
+            val cardHeight = (54f * scaleY * 1.3f).toInt()
 
             val scaledFront = Bitmap.createScaledBitmap(frontCropped, cardWidth, cardHeight, true)
             val scaledBack = Bitmap.createScaledBitmap(backCropped, cardWidth, cardHeight, true)
@@ -2235,11 +2235,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
 
-            // Scale to physical 86mm x 54mm on A4 sheet
+            // Scale to physical 86mm x 54mm on A4 sheet, increased by 30% as requested
             val scaleX = canvasWidth.toFloat() / 210f
             val scaleY = canvasHeight.toFloat() / 297f
-            val cardWidth = (86f * scaleX).toInt()
-            val cardHeight = (54f * scaleY).toInt()
+            val cardWidth = (86f * scaleX * 1.3f).toInt()
+            val cardHeight = (54f * scaleY * 1.3f).toInt()
 
             val scaledFront = Bitmap.createScaledBitmap(frontCropped, cardWidth, cardHeight, true)
             val scaledBack = Bitmap.createScaledBitmap(backCropped, cardWidth, cardHeight, true)
