@@ -2549,35 +2549,175 @@ fun SignatureStudioScreen(
 }
 }
 
-    // Custom Color Hex Help dialog
+    // Custom Color Picker Dialog
     if (showColorHelpDialog) {
+        var rValue by remember { mutableFloatStateOf(0f) }
+        var gValue by remember { mutableFloatStateOf(0f) }
+        var bValue by remember { mutableFloatStateOf(0f) }
+
+        LaunchedEffect(Unit) {
+            try {
+                val colorInt = android.graphics.Color.parseColor(selectedColor)
+                rValue = android.graphics.Color.red(colorInt).toFloat()
+                gValue = android.graphics.Color.green(colorInt).toFloat()
+                bValue = android.graphics.Color.blue(colorInt).toFloat()
+            } catch (e: Exception) {
+                rValue = 0f
+                gValue = 0f
+                bValue = 0f
+            }
+        }
+
+        val computedHex = String.format("#%02X%02X%02X", rValue.toInt(), gValue.toInt(), bValue.toInt())
+        val computedColor = Color(rValue.toInt(), gValue.toInt(), bValue.toInt())
+        val textColor = if ((rValue * 0.299 + gValue * 0.587 + bValue * 0.114) > 150) Color.Black else Color.White
+
         AlertDialog(
             onDismissRequest = { showColorHelpDialog = false },
-            title = { Text("Custom Color Hex Code", fontWeight = FontWeight.Bold) },
+            title = { Text("Visual Color Picker", fontWeight = FontWeight.Bold) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Type any hex color code below to draw with custom inks:", fontSize = 13.sp)
-                    OutlinedTextField(
-                        value = customColorHexInput,
-                        onValueChange = { customColorHexInput = it },
-                        label = { Text("Hex Code (e.g. #FF5733 or #800080)") },
-                        placeholder = { Text("#FF5733") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    // Quick custom palettes
-                    Text("Presets:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.secondary)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("#FF5733", "#FFD700", "#FF1493", "#00FFFF", "#800080").forEach { col ->
-                            Box(
-                                modifier = Modifier
-                                    .size(24.dp)
-                                    .background(Color(android.graphics.Color.parseColor(col)), CircleShape)
-                                    .border(1.dp, Color.LightGray, CircleShape)
-                                    .clickable {
-                                        customColorHexInput = col
-                                    }
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Mix Red, Green, and Blue sliders or select a preset to create your custom drawing ink:", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+                    // Large dynamic preview box with contrast-adjusted hex label
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(60.dp)
+                            .background(computedColor, RoundedCornerShape(12.dp))
+                            .border(BorderStroke(1.dp, Color.LightGray.copy(alpha = 0.5f)), RoundedCornerShape(12.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = computedHex,
+                            color = textColor,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp,
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                    }
+
+                    // RGB Sliders
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        // Red Slider
+                        Column {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Red", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFFEF4444))
+                                Text("${rValue.toInt()}", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Slider(
+                                value = rValue,
+                                onValueChange = { rValue = it },
+                                valueRange = 0f..255f,
+                                colors = SliderDefaults.colors(
+                                    thumbColor = Color(0xFFEF4444),
+                                    activeTrackColor = Color(0xFFEF4444),
+                                    inactiveTrackColor = Color(0xFFEF4444).copy(alpha = 0.2f)
+                                )
                             )
+                        }
+
+                        // Green Slider
+                        Column {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Green", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF10B981))
+                                Text("${gValue.toInt()}", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Slider(
+                                value = gValue,
+                                onValueChange = { gValue = it },
+                                valueRange = 0f..255f,
+                                colors = SliderDefaults.colors(
+                                    thumbColor = Color(0xFF10B981),
+                                    activeTrackColor = Color(0xFF10B981),
+                                    inactiveTrackColor = Color(0xFF10B981).copy(alpha = 0.2f)
+                                )
+                            )
+                        }
+
+                        // Blue Slider
+                        Column {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Blue", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF3B82F6))
+                                Text("${bValue.toInt()}", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Slider(
+                                value = bValue,
+                                onValueChange = { bValue = it },
+                                valueRange = 0f..255f,
+                                colors = SliderDefaults.colors(
+                                    thumbColor = Color(0xFF3B82F6),
+                                    activeTrackColor = Color(0xFF3B82F6),
+                                    inactiveTrackColor = Color(0xFF3B82F6).copy(alpha = 0.2f)
+                                )
+                            )
+                        }
+                    }
+
+                    // Pro presets
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("Designer Swatches:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.secondary)
+                        
+                        val row1 = listOf("#F43F5E", "#EC4899", "#D946EF", "#8B5CF6", "#6366F1", "#3B82F6", "#0EA5E9", "#06B6D4")
+                        val row2 = listOf("#14B8A6", "#10B981", "#22C55E", "#84CC16", "#EAB308", "#F97316", "#EF4444", "#6B7280")
+                        
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            row1.forEach { hex ->
+                                Box(
+                                    modifier = Modifier
+                                        .size(24.dp)
+                                        .weight(1f)
+                                        .aspectRatio(1f)
+                                        .background(Color(android.graphics.Color.parseColor(hex)), CircleShape)
+                                        .border(BorderStroke(1.dp, Color.LightGray.copy(alpha = 0.5f)), CircleShape)
+                                        .clickable {
+                                            try {
+                                                val c = android.graphics.Color.parseColor(hex)
+                                                rValue = android.graphics.Color.red(c).toFloat()
+                                                gValue = android.graphics.Color.green(c).toFloat()
+                                                bValue = android.graphics.Color.blue(c).toFloat()
+                                            } catch (e: Exception) {}
+                                        }
+                                )
+                            }
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            row2.forEach { hex ->
+                                Box(
+                                    modifier = Modifier
+                                        .size(24.dp)
+                                        .weight(1f)
+                                        .aspectRatio(1f)
+                                        .background(Color(android.graphics.Color.parseColor(hex)), CircleShape)
+                                        .border(BorderStroke(1.dp, Color.LightGray.copy(alpha = 0.5f)), CircleShape)
+                                        .clickable {
+                                            try {
+                                                val c = android.graphics.Color.parseColor(hex)
+                                                rValue = android.graphics.Color.red(c).toFloat()
+                                                gValue = android.graphics.Color.green(c).toFloat()
+                                                bValue = android.graphics.Color.blue(c).toFloat()
+                                            } catch (e: Exception) {}
+                                        }
+                                )
+                            }
                         }
                     }
                 }
@@ -2585,21 +2725,12 @@ fun SignatureStudioScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        val cleaned = customColorHexInput.trim()
-                        if (cleaned.isNotBlank()) {
-                            val hexToApply = if (cleaned.startsWith("#")) cleaned else "#$cleaned"
-                            try {
-                                android.graphics.Color.parseColor(hexToApply)
-                                selectedColor = hexToApply
-                                isEraserMode = false
-                                showColorHelpDialog = false
-                            } catch (e: Exception) {
-                                viewModel.triggerFeedback("Invalid Hex color. Use format like #FF5733.")
-                            }
-                        }
+                        selectedColor = computedHex
+                        isEraserMode = false
+                        showColorHelpDialog = false
                     }
                 ) {
-                    Text("Apply")
+                    Text("Apply Ink")
                 }
             },
             dismissButton = {
@@ -4212,6 +4343,204 @@ fun BorderStroke(iif: Boolean, col: Color, defaultCol: Color) = BorderStroke(
 )
 
 
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DrawingColorPickerDialog(
+    initialColorHex: String,
+    onDismissRequest: () -> Unit,
+    onColorSelected: (String) -> Unit
+) {
+    var rValue by remember { mutableFloatStateOf(0f) }
+    var gValue by remember { mutableFloatStateOf(0f) }
+    var bValue by remember { mutableFloatStateOf(0f) }
+
+    LaunchedEffect(initialColorHex) {
+        try {
+            val colorInt = android.graphics.Color.parseColor(initialColorHex)
+            rValue = android.graphics.Color.red(colorInt).toFloat()
+            gValue = android.graphics.Color.green(colorInt).toFloat()
+            bValue = android.graphics.Color.blue(colorInt).toFloat()
+        } catch (e: Exception) {
+            rValue = 0f
+            gValue = 0f
+            bValue = 0f
+        }
+    }
+
+    val computedHex = String.format("#%02X%02X%02X", rValue.toInt(), gValue.toInt(), bValue.toInt())
+    val computedColor = Color(rValue.toInt(), gValue.toInt(), bValue.toInt())
+    val textColor = if ((rValue * 0.299 + gValue * 0.587 + bValue * 0.114) > 150) Color.Black else Color.White
+
+    AlertDialog(
+        onDismissRequest = onDismissRequest,
+        title = { Text("Drawing Color Picker", fontWeight = FontWeight.Bold) },
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Select a preset or mix Red, Green, and Blue sliders to customize your drawing ink:", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+                // Dynamic preview box with contrast-adjusted hex label
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(60.dp)
+                        .background(computedColor, RoundedCornerShape(12.dp))
+                        .border(androidx.compose.foundation.BorderStroke(1.dp, Color.LightGray.copy(alpha = 0.5f)), RoundedCornerShape(12.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = computedHex,
+                        color = textColor,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp,
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                }
+
+                // RGB Sliders
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // Red Slider
+                    Column {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Red", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFFEF4444))
+                            Text("${rValue.toInt()}", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Slider(
+                            value = rValue,
+                            onValueChange = { rValue = it },
+                            valueRange = 0f..255f,
+                            colors = SliderDefaults.colors(
+                                thumbColor = Color(0xFFEF4444),
+                                activeTrackColor = Color(0xFFEF4444),
+                                inactiveTrackColor = Color(0xFFEF4444).copy(alpha = 0.2f)
+                            )
+                        )
+                    }
+
+                    // Green Slider
+                    Column {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Green", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF10B981))
+                            Text("${gValue.toInt()}", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Slider(
+                            value = gValue,
+                            onValueChange = { gValue = it },
+                            valueRange = 0f..255f,
+                            colors = SliderDefaults.colors(
+                                thumbColor = Color(0xFF10B981),
+                                activeTrackColor = Color(0xFF10B981),
+                                inactiveTrackColor = Color(0xFF10B981).copy(alpha = 0.2f)
+                            )
+                        )
+                    }
+
+                    // Blue Slider
+                    Column {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Blue", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF3B82F6))
+                            Text("${bValue.toInt()}", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Slider(
+                            value = bValue,
+                            onValueChange = { bValue = it },
+                            valueRange = 0f..255f,
+                            colors = SliderDefaults.colors(
+                                thumbColor = Color(0xFF3B82F6),
+                                activeTrackColor = Color(0xFF3B82F6),
+                                inactiveTrackColor = Color(0xFF3B82F6).copy(alpha = 0.2f)
+                            )
+                        )
+                    }
+                }
+
+                // Swatches
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Swatches:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.secondary)
+                    
+                    val row1 = listOf("#F43F5E", "#EC4899", "#D946EF", "#8B5CF6", "#6366F1", "#3B82F6", "#0EA5E9", "#06B6D4")
+                    val row2 = listOf("#14B8A6", "#10B981", "#22C55E", "#84CC16", "#EAB308", "#F97316", "#EF4444", "#000000")
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        row1.forEach { hex ->
+                            Box(
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .weight(1f)
+                                    .aspectRatio(1f)
+                                    .background(Color(android.graphics.Color.parseColor(hex)), CircleShape)
+                                    .border(androidx.compose.foundation.BorderStroke(1.dp, Color.LightGray.copy(alpha = 0.5f)), CircleShape)
+                                    .clickable {
+                                        try {
+                                            val c = android.graphics.Color.parseColor(hex)
+                                            rValue = android.graphics.Color.red(c).toFloat()
+                                            gValue = android.graphics.Color.green(c).toFloat()
+                                            bValue = android.graphics.Color.blue(c).toFloat()
+                                        } catch (e: Exception) {}
+                                    }
+                            )
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        row2.forEach { hex ->
+                            Box(
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .weight(1f)
+                                    .aspectRatio(1f)
+                                    .background(Color(android.graphics.Color.parseColor(hex)), CircleShape)
+                                    .border(androidx.compose.foundation.BorderStroke(1.dp, Color.LightGray.copy(alpha = 0.5f)), CircleShape)
+                                    .clickable {
+                                        try {
+                                            val c = android.graphics.Color.parseColor(hex)
+                                            rValue = android.graphics.Color.red(c).toFloat()
+                                            gValue = android.graphics.Color.green(c).toFloat()
+                                            bValue = android.graphics.Color.blue(c).toFloat()
+                                        } catch (e: Exception) {}
+                                    }
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    onColorSelected(computedHex)
+                    onDismissRequest()
+                }
+            ) {
+                Text("Select Ink")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismissRequest) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+
 @Composable
 fun DrawingSettingsToolbar(
     drawColorHex: String,
@@ -4221,6 +4550,16 @@ fun DrawingSettingsToolbar(
     drawPenType: String,
     onPenTypeChanged: (String) -> Unit
 ) {
+    var showColorPicker by remember { mutableStateOf(false) }
+
+    if (showColorPicker) {
+        DrawingColorPickerDialog(
+            initialColorHex = drawColorHex,
+            onDismissRequest = { showColorPicker = false },
+            onColorSelected = onColorSelected
+        )
+    }
+
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -4314,14 +4653,14 @@ fun DrawingSettingsToolbar(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    listOf(
+                    val baseColors = listOf(
                         "#D62246" to Color(0xFFD62246), // Red
                         "#005FB8" to Color(0xFF005FB8), // Blue
                         "#10AC84" to Color(0xFF10AC84), // Green
                         "#F5A623" to Color(0xFFF5A623), // Yellow
-                        "#000000" to Color.Black,       // Black
-                        "#FFFFFF" to Color.White        // White
-                    ).forEach { (colorKey, colorVal) ->
+                        "#000000" to Color.Black        // Black
+                    )
+                    baseColors.forEach { (colorKey, colorVal) ->
                         val isSelected = drawColorHex == colorKey
                         Box(
                             modifier = Modifier
@@ -4329,10 +4668,33 @@ fun DrawingSettingsToolbar(
                                 .background(colorVal, CircleShape)
                                 .border(
                                     width = if (isSelected) 2.5.dp else 1.dp,
-                                    color = if (isSelected) MaterialTheme.colorScheme.primary else if (colorKey == "#FFFFFF") Color.LightGray else Color.White,
+                                    color = if (isSelected) MaterialTheme.colorScheme.primary else Color.White,
                                     shape = CircleShape
                                 )
                                 .clickable { onColorSelected(colorKey) }
+                        )
+                    }
+
+                    // Color Selector/Picker Button replacing White
+                    val isCustomSelected = baseColors.none { it.first == drawColorHex }
+                    val currentCustomColor = try { Color(android.graphics.Color.parseColor(drawColorHex)) } catch (e: Exception) { Color.LightGray }
+                    Box(
+                        modifier = Modifier
+                            .size(24.dp)
+                            .background(currentCustomColor, CircleShape)
+                            .border(
+                                width = if (isCustomSelected) 2.5.dp else 1.dp,
+                                color = if (isCustomSelected) MaterialTheme.colorScheme.primary else Color.LightGray.copy(alpha = 0.5f),
+                                shape = CircleShape
+                            )
+                            .clickable { showColorPicker = true },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ColorLens,
+                            contentDescription = "Color Selector/Picker",
+                            tint = if ((currentCustomColor.red * 0.299 + currentCustomColor.green * 0.587 + currentCustomColor.blue * 0.114) > 0.6f) Color.Black else Color.White,
+                            modifier = Modifier.size(14.dp)
                         )
                     }
                 }
@@ -4376,6 +4738,7 @@ fun EditorScreenRemoved(
     var drawStrokeWidth by remember { mutableFloatStateOf(6f) }
     var drawPenType by remember { mutableStateOf("pen") } // "pen", "highlighter", "dashed"
     var drawShapeType by remember { mutableStateOf("brush") } // "brush", "line", "box", "circle", "select"
+    var showAnnotateColorPicker by remember { mutableStateOf(false) }
     var selectedDrawingId by remember { mutableStateOf<String?>(null) }
     var textStickerDraft by remember { mutableStateOf("") }
     var isAddingTextMode by remember { mutableStateOf(false) }
@@ -4390,6 +4753,11 @@ fun EditorScreenRemoved(
     var selectedWordToEdit by remember { mutableStateOf<TextAnnotationDef?>(null) }
     var selectedAnnotationId by remember { mutableStateOf<String?>(null) }
     var editWordTextDraft by remember { mutableStateOf("") }
+ 
+    var showAddWordColorPicker by remember { mutableStateOf(false) }
+    var showAddWordBgColorPicker by remember { mutableStateOf(false) }
+    var showEditWordColorPicker by remember { mutableStateOf(false) }
+    var showEditWordBgColorPicker by remember { mutableStateOf(false) }
  
     var showAddWordDialog by remember { mutableStateOf(false) }
     var addWordX by remember { mutableFloatStateOf(0f) }
@@ -4936,20 +5304,19 @@ fun EditorScreenRemoved(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text("Color: ", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    val colors = listOf(
+                                    val baseColors = listOf(
                                         "#EF4444" to Color(0xFFEF4444),
                                         "#3B82F6" to Color(0xFF3B82F6),
                                         "#10B981" to Color(0xFF10B981),
                                         "#1E293B" to Color(0xFF1E293B),
                                         "#F59E0B" to Color(0xFFF59E0B),
-                                        "#8B5CF6" to Color(0xFF8B5CF6),
                                         "#FFFFFF" to Color(0xFFFFFFFF)
                                     )
                                     Row(
                                         modifier = Modifier.weight(1f),
                                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
-                                        colors.forEach { (hex, col) ->
+                                        baseColors.forEach { (hex, col) ->
                                             Box(
                                                 modifier = Modifier
                                                     .size(24.dp)
@@ -4973,6 +5340,48 @@ fun EditorScreenRemoved(
                                                     }
                                             )
                                         }
+
+                                        // Dynamic Color Picker Button replacing White
+                                        val isCustomSelected = baseColors.none { it.first.lowercase() == drawColorHex.lowercase() }
+                                        val currentCustomColor = try { Color(android.graphics.Color.parseColor(drawColorHex)) } catch (e: Exception) { Color.LightGray }
+                                        Box(
+                                            modifier = Modifier
+                                                .size(24.dp)
+                                                .background(currentCustomColor, CircleShape)
+                                                .border(
+                                                    width = if (isCustomSelected) 2.dp else 1.dp,
+                                                    color = if (isCustomSelected) MaterialTheme.colorScheme.onSurface else Color.LightGray.copy(alpha = 0.5f),
+                                                    shape = CircleShape
+                                                )
+                                                .clickable { showAnnotateColorPicker = true },
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.ColorLens,
+                                                contentDescription = "Color Selector/Picker",
+                                                tint = if ((currentCustomColor.red * 0.299 + currentCustomColor.green * 0.587 + currentCustomColor.blue * 0.114) > 0.6f) Color.Black else Color.White,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                        }
+                                    }
+
+                                    if (showAnnotateColorPicker) {
+                                        DrawingColorPickerDialog(
+                                            initialColorHex = drawColorHex,
+                                            onDismissRequest = { showAnnotateColorPicker = false },
+                                            onColorSelected = { selectedHex ->
+                                                drawColorHex = selectedHex
+                                                val selId = selectedDrawingId
+                                                if (selId != null) {
+                                                    val idx = currentDrawings.indexOfFirst { it.id == selId }
+                                                    if (idx != -1) {
+                                                        val updatedDraw = currentDrawings[idx].copy(colorHex = selectedHex)
+                                                        currentDrawings[idx] = updatedDraw
+                                                        viewModel.editActivePageDrawings(currentDrawings.toList())
+                                                    }
+                                                }
+                                            }
+                                        )
                                     }
 
                                     Row(
@@ -6801,16 +7210,18 @@ fun EditorScreenRemoved(
                         Text("Text Color:", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            listOf(
+                            val baseColors = listOf(
                                 "#000000" to Color.Black,
                                 "#FFFFFF" to Color.White,
                                 "#D62246" to Color(0xFFD62246),
                                 "#005FB8" to Color(0xFF005FB8),
                                 "#10AC84" to Color(0xFF10AC84),
                                 "#F5A623" to Color(0xFFF5A623)
-                            ).forEach { (colorKey, colorVal) ->
+                            )
+                            baseColors.forEach { (colorKey, colorVal) ->
                                 val isSelected = addWordColorHex.lowercase() == colorKey.lowercase()
                                 Box(
                                     modifier = Modifier
@@ -6824,21 +7235,54 @@ fun EditorScreenRemoved(
                                         .clickable { addWordColorHex = colorKey }
                                 )
                             }
+
+                            // Custom Text Color Picker Button
+                            val isCustomSelected = baseColors.none { it.first.lowercase() == addWordColorHex.lowercase() }
+                            val currentCustomColor = try { Color(android.graphics.Color.parseColor(addWordColorHex)) } catch (e: Exception) { Color.LightGray }
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .background(currentCustomColor, CircleShape)
+                                    .border(
+                                        width = if (isCustomSelected) 3.dp else 1.dp,
+                                        color = if (isCustomSelected) MaterialTheme.colorScheme.primary else Color.LightGray,
+                                        shape = CircleShape
+                                    )
+                                    .clickable { showAddWordColorPicker = true },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ColorLens,
+                                    contentDescription = "Custom Text Color",
+                                    tint = if ((currentCustomColor.red * 0.299 + currentCustomColor.green * 0.587 + currentCustomColor.blue * 0.114) > 150f) Color.Black else Color.White,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+
+                        if (showAddWordColorPicker) {
+                            DrawingColorPickerDialog(
+                                initialColorHex = addWordColorHex,
+                                onDismissRequest = { showAddWordColorPicker = false },
+                                onColorSelected = { selectedHex -> addWordColorHex = selectedHex }
+                            )
                         }
 
                         Text("Background Fill Color:", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            listOf(
+                            val baseBgColors = listOf(
                                 "transparent" to Color.Transparent,
                                 "#FFF275" to Color(0xFFFFF275), // Yellow Highlight
                                 "#FFFFFF" to Color.White,       // Solid White
                                 "#D2E9FF" to Color(0xFFD2E9FF), // Soft Blue
                                 "#D4F7D3" to Color(0xFFD4F7D3), // Soft Green
                                 "#FFD2D2" to Color(0xFFFFD2D2)  // Soft Pink
-                            ).forEach { (colorKey, colorVal) ->
+                            )
+                            baseBgColors.forEach { (colorKey, colorVal) ->
                                 val isSelected = addWordBgColorHex.lowercase() == colorKey.lowercase()
                                 Box(
                                     modifier = Modifier
@@ -6862,6 +7306,39 @@ fun EditorScreenRemoved(
                                     }
                                 }
                             }
+
+                            // Custom Background Color Picker Button
+                            val isCustomBgSelected = baseBgColors.none { it.first.lowercase() == addWordBgColorHex.lowercase() }
+                            val currentCustomBgColor = try {
+                                if (addWordBgColorHex.lowercase() == "transparent" || addWordBgColorHex.isBlank()) Color.LightGray else Color(android.graphics.Color.parseColor(addWordBgColorHex))
+                            } catch (e: Exception) { Color.LightGray }
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .background(currentCustomBgColor, RoundedCornerShape(4.dp))
+                                    .border(
+                                        width = if (isCustomBgSelected) 3.dp else 1.dp,
+                                        color = if (isCustomBgSelected) MaterialTheme.colorScheme.primary else Color.LightGray,
+                                        shape = RoundedCornerShape(4.dp)
+                                    )
+                                    .clickable { showAddWordBgColorPicker = true },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ColorLens,
+                                    contentDescription = "Custom Background Color",
+                                    tint = if (addWordBgColorHex.lowercase() == "transparent" || (currentCustomBgColor.red * 0.299 + currentCustomBgColor.green * 0.587 + currentCustomBgColor.blue * 0.114) > 150f) Color.Black else Color.White,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+
+                        if (showAddWordBgColorPicker) {
+                            DrawingColorPickerDialog(
+                                initialColorHex = if (addWordBgColorHex.lowercase() == "transparent" || addWordBgColorHex.isBlank()) "#FFFFFF" else addWordBgColorHex,
+                                onDismissRequest = { showAddWordBgColorPicker = false },
+                                onColorSelected = { selectedHex -> addWordBgColorHex = selectedHex }
+                            )
                         }
 
                         Spacer(modifier = Modifier.height(4.dp))
@@ -7302,16 +7779,18 @@ fun EditorScreenRemoved(
                         Text("Text Color:", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            listOf(
+                            val baseColors = listOf(
                                 "#000000" to Color.Black,
                                 "#FFFFFF" to Color.White,
                                 "#D62246" to Color(0xFFD62246),
                                 "#005FB8" to Color(0xFF005FB8),
                                 "#10AC84" to Color(0xFF10AC84),
                                 "#F5A623" to Color(0xFFF5A623)
-                            ).forEach { (colorKey, colorVal) ->
+                            )
+                            baseColors.forEach { (colorKey, colorVal) ->
                                 val isSelected = editWordColorHex.lowercase() == colorKey.lowercase()
                                 Box(
                                     modifier = Modifier
@@ -7325,21 +7804,54 @@ fun EditorScreenRemoved(
                                         .clickable { editWordColorHex = colorKey }
                                 )
                             }
+
+                            // Custom Text Color Picker Button
+                            val isCustomSelected = baseColors.none { it.first.lowercase() == editWordColorHex.lowercase() }
+                            val currentCustomColor = try { Color(android.graphics.Color.parseColor(editWordColorHex)) } catch (e: Exception) { Color.LightGray }
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .background(currentCustomColor, CircleShape)
+                                    .border(
+                                        width = if (isCustomSelected) 3.dp else 1.dp,
+                                        color = if (isCustomSelected) MaterialTheme.colorScheme.primary else Color.LightGray,
+                                        shape = CircleShape
+                                    )
+                                    .clickable { showEditWordColorPicker = true },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ColorLens,
+                                    contentDescription = "Custom Text Color",
+                                    tint = if ((currentCustomColor.red * 0.299 + currentCustomColor.green * 0.587 + currentCustomColor.blue * 0.114) > 150f) Color.Black else Color.White,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+
+                        if (showEditWordColorPicker) {
+                            DrawingColorPickerDialog(
+                                initialColorHex = editWordColorHex,
+                                onDismissRequest = { showEditWordColorPicker = false },
+                                onColorSelected = { selectedHex -> editWordColorHex = selectedHex }
+                            )
                         }
 
                         Text("Background Fill Color:", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            listOf(
+                            val baseBgColors = listOf(
                                 "transparent" to Color.Transparent,
                                 "#FFF275" to Color(0xFFFFF275), // Yellow Highlight
                                 "#FFFFFF" to Color.White,       // Solid White
                                 "#D2E9FF" to Color(0xFFD2E9FF), // Soft Blue
                                 "#D4F7D3" to Color(0xFFD4F7D3), // Soft Green
                                 "#FFD2D2" to Color(0xFFFFD2D2)  // Soft Pink
-                            ).forEach { (colorKey, colorVal) ->
+                            )
+                            baseBgColors.forEach { (colorKey, colorVal) ->
                                 val isSelected = editWordBgColorHex.lowercase() == colorKey.lowercase()
                                 Box(
                                     modifier = Modifier
@@ -7363,6 +7875,39 @@ fun EditorScreenRemoved(
                                     }
                                 }
                             }
+
+                            // Custom Background Color Picker Button
+                            val isCustomBgSelected = baseBgColors.none { it.first.lowercase() == editWordBgColorHex.lowercase() }
+                            val currentCustomBgColor = try {
+                                if (editWordBgColorHex.lowercase() == "transparent" || editWordBgColorHex.isBlank()) Color.LightGray else Color(android.graphics.Color.parseColor(editWordBgColorHex))
+                            } catch (e: Exception) { Color.LightGray }
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .background(currentCustomBgColor, RoundedCornerShape(4.dp))
+                                    .border(
+                                        width = if (isCustomBgSelected) 3.dp else 1.dp,
+                                        color = if (isCustomBgSelected) MaterialTheme.colorScheme.primary else Color.LightGray,
+                                        shape = RoundedCornerShape(4.dp)
+                                    )
+                                    .clickable { showEditWordBgColorPicker = true },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ColorLens,
+                                    contentDescription = "Custom Background Color",
+                                    tint = if (editWordBgColorHex.lowercase() == "transparent" || (currentCustomBgColor.red * 0.299 + currentCustomBgColor.green * 0.587 + currentCustomBgColor.blue * 0.114) > 150f) Color.Black else Color.White,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+
+                        if (showEditWordBgColorPicker) {
+                            DrawingColorPickerDialog(
+                                initialColorHex = if (editWordBgColorHex.lowercase() == "transparent" || editWordBgColorHex.isBlank()) "#FFFFFF" else editWordBgColorHex,
+                                onDismissRequest = { showEditWordBgColorPicker = false },
+                                onColorSelected = { selectedHex -> editWordBgColorHex = selectedHex }
+                            )
                         }
 
                         Spacer(modifier = Modifier.height(4.dp))
