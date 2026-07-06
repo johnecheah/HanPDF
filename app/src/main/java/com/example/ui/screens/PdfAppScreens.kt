@@ -877,7 +877,7 @@ fun DashboardScreen(
                         Spacer(modifier = Modifier.height(18.dp))
                         
                         Text(
-                            text = "Created by\nJohne Cheah\n@2026\n \nVersion V1.1",
+                            text = "Created by\nJohne Cheah\n@2026\n \nVersion V1.2",
                             fontSize = 15.sp,
                             lineHeight = 22.sp,
                             fontWeight = FontWeight.Bold,
@@ -2258,73 +2258,98 @@ fun SignatureStudioScreen(
                         
                         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             // Standard Pen
-                            IconButton(
-                                onClick = { selectedPenType = "pen"; isEraserMode = false },
+                            Box(
+                                contentAlignment = Alignment.Center,
                                 modifier = Modifier
-                                    .size(36.dp)
-                                    .background(if (!isEraserMode && selectedPenType == "pen") MaterialTheme.colorScheme.primary else Color.Transparent, CircleShape)
+                                    .size(28.dp)
+                                    .background(
+                                        if (!isEraserMode && selectedPenType == "pen") MaterialTheme.colorScheme.primary 
+                                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f), 
+                                        CircleShape
+                                    )
+                                    .clickable { selectedPenType = "pen"; isEraserMode = false }
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Gesture,
                                     contentDescription = "Standard Pen",
                                     tint = if (!isEraserMode && selectedPenType == "pen") Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(18.dp)
+                                    modifier = Modifier.size(14.dp)
                                 )
                             }
                             // Fountain Pen / Calligraphy
-                            IconButton(
-                                onClick = { selectedPenType = "calligraphy"; isEraserMode = false },
+                            Box(
+                                contentAlignment = Alignment.Center,
                                 modifier = Modifier
-                                    .size(36.dp)
-                                    .background(if (!isEraserMode && selectedPenType == "calligraphy") MaterialTheme.colorScheme.primary else Color.Transparent, CircleShape)
+                                    .size(28.dp)
+                                    .background(
+                                        if (!isEraserMode && selectedPenType == "calligraphy") MaterialTheme.colorScheme.primary 
+                                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f), 
+                                        CircleShape
+                                    )
+                                    .clickable { selectedPenType = "calligraphy"; isEraserMode = false }
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Brush,
                                     contentDescription = "Calligraphy Brush",
                                     tint = if (!isEraserMode && selectedPenType == "calligraphy") Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(18.dp)
+                                    modifier = Modifier.size(14.dp)
                                 )
                             }
                             // Neon Highlighter
-                            IconButton(
-                                onClick = { selectedPenType = "highlighter"; isEraserMode = false },
+                            Box(
+                                contentAlignment = Alignment.Center,
                                 modifier = Modifier
-                                    .size(36.dp)
-                                    .background(if (!isEraserMode && selectedPenType == "highlighter") MaterialTheme.colorScheme.primary else Color.Transparent, CircleShape)
+                                    .size(28.dp)
+                                    .background(
+                                        if (!isEraserMode && selectedPenType == "highlighter") MaterialTheme.colorScheme.primary 
+                                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f), 
+                                        CircleShape
+                                    )
+                                    .clickable { selectedPenType = "highlighter"; isEraserMode = false }
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.BorderColor,
                                     contentDescription = "Neon Highlighter",
                                     tint = if (!isEraserMode && selectedPenType == "highlighter") Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(16.dp)
+                                    modifier = Modifier.size(13.dp)
                                 )
                             }
                             // Dashed Pen
-                            IconButton(
-                                onClick = { selectedPenType = "dashed"; isEraserMode = false },
+                            Box(
+                                contentAlignment = Alignment.Center,
                                 modifier = Modifier
-                                    .size(36.dp)
-                                    .background(if (!isEraserMode && selectedPenType == "dashed") MaterialTheme.colorScheme.primary else Color.Transparent, CircleShape)
+                                    .size(28.dp)
+                                    .background(
+                                        if (!isEraserMode && selectedPenType == "dashed") MaterialTheme.colorScheme.primary 
+                                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f), 
+                                        CircleShape
+                                    )
+                                    .clickable { selectedPenType = "dashed"; isEraserMode = false }
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.LinearScale,
                                     contentDescription = "Dashed Pen",
                                     tint = if (!isEraserMode && selectedPenType == "dashed") Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(18.dp)
+                                    modifier = Modifier.size(14.dp)
                                 )
                             }
                             // Vector Eraser
-                            IconButton(
-                                onClick = { isEraserMode = true },
+                            Box(
+                                contentAlignment = Alignment.Center,
                                 modifier = Modifier
-                                    .size(36.dp)
-                                    .background(if (isEraserMode) Color(0xFFEF4444) else Color.Transparent, CircleShape)
+                                    .size(28.dp)
+                                    .background(
+                                        if (isEraserMode) Color(0xFFEF4444) 
+                                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f), 
+                                        CircleShape
+                                    )
+                                    .clickable { isEraserMode = true }
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.AutoFixNormal,
                                     contentDescription = "Vector Eraser",
                                     tint = if (isEraserMode) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(18.dp)
+                                    modifier = Modifier.size(14.dp)
                                 )
                             }
                         }
@@ -2361,15 +2386,25 @@ fun SignatureStudioScreen(
                                 )
                             }
 
-                            // Custom Color Button
-                            IconButton(
-                                onClick = { showColorHelpDialog = true },
+                            // Custom Color Button (Color Picker)
+                            val customColorBg = Color(android.graphics.Color.parseColor(selectedColor))
+                            val isDarkBg = (customColorBg.red * 0.299 + customColorBg.green * 0.587 + customColorBg.blue * 0.114) < 0.5
+                            val iconColor = if (isDarkBg) Color.White else Color.Black.copy(alpha = 0.8f)
+
+                            Box(
+                                contentAlignment = Alignment.Center,
                                 modifier = Modifier
                                     .size(30.dp)
-                                    .background(MaterialTheme.colorScheme.surface, CircleShape)
-                                    .border(1.dp, Color.LightGray.copy(alpha = 0.5f), CircleShape)
+                                    .background(customColorBg, CircleShape)
+                                    .border(BorderStroke(1.dp, Color.LightGray.copy(alpha = 0.5f)), CircleShape)
+                                    .clickable { showColorHelpDialog = true }
                             ) {
-                                Icon(Icons.Default.ColorLens, "Custom color", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                                Icon(
+                                    imageVector = Icons.Default.ColorLens,
+                                    contentDescription = "Custom color",
+                                    tint = iconColor,
+                                    modifier = Modifier.size(16.dp)
+                                )
                             }
                         }
                     }
@@ -2377,7 +2412,7 @@ fun SignatureStudioScreen(
                     Spacer(modifier = Modifier.height(10.dp))
 
                     // Stroke Thickness Slider Control
-                    Column {
+                    Column(modifier = Modifier.fillMaxWidth()) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -2395,7 +2430,11 @@ fun SignatureStudioScreen(
                                 activeTrackColor = MaterialTheme.colorScheme.primary,
                                 inactiveTrackColor = MaterialTheme.colorScheme.outlineVariant
                             ),
-                            modifier = Modifier.padding(horizontal = 4.dp)
+                            modifier = Modifier
+                                .fillMaxWidth(0.96f)
+                                .align(Alignment.CenterHorizontally)
+                                .graphicsLayer(scaleY = 0.8f)
+                                .padding(horizontal = 4.dp)
                         )
                     }
                 }
@@ -4349,7 +4388,8 @@ fun BorderStroke(iif: Boolean, col: Color, defaultCol: Color) = BorderStroke(
 fun DrawingColorPickerDialog(
     initialColorHex: String,
     onDismissRequest: () -> Unit,
-    onColorSelected: (String) -> Unit
+    onColorSelected: (String) -> Unit,
+    onEyedropperClick: (() -> Unit)? = null
 ) {
     var rValue by remember { mutableFloatStateOf(0f) }
     var gValue by remember { mutableFloatStateOf(0f) }
@@ -4382,22 +4422,45 @@ fun DrawingColorPickerDialog(
             ) {
                 Text("Select a preset or mix Red, Green, and Blue sliders to customize your drawing ink:", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
-                // Dynamic preview box with contrast-adjusted hex label
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(60.dp)
-                        .background(computedColor, RoundedCornerShape(12.dp))
-                        .border(androidx.compose.foundation.BorderStroke(1.dp, Color.LightGray.copy(alpha = 0.5f)), RoundedCornerShape(12.dp)),
-                    contentAlignment = Alignment.Center
+                // Row containing the dynamic preview box and optional Eyedropper button
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = computedHex,
-                        color = textColor,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp,
-                        style = MaterialTheme.typography.titleMedium
-                    )
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(56.dp)
+                            .background(computedColor, RoundedCornerShape(12.dp))
+                            .border(androidx.compose.foundation.BorderStroke(1.dp, Color.LightGray.copy(alpha = 0.5f)), RoundedCornerShape(12.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = computedHex,
+                            color = textColor,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp,
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                    }
+
+                    if (onEyedropperClick != null) {
+                        FilledIconButton(
+                            onClick = onEyedropperClick,
+                            modifier = Modifier.size(56.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = IconButtonDefaults.filledIconButtonColors(
+                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Colorize,
+                                contentDescription = "Eyedropper Tool"
+                            )
+                        }
+                    }
                 }
 
                 // RGB Sliders
@@ -4771,6 +4834,7 @@ fun EditorScreenRemoved(
     var editWordColorHex by remember { mutableStateOf("#000000") }
     var addWordBgColorHex by remember { mutableStateOf("transparent") }
     var editWordBgColorHex by remember { mutableStateOf("transparent") }
+    var eyedropperTarget by remember { mutableStateOf<String?>(null) } // "draw_ink", "text_color_add", "bg_color_add", "text_color_edit", "bg_color_edit"
     var addWordHasOutline by remember { mutableStateOf(false) }
     var editWordHasOutline by remember { mutableStateOf(false) }
     var addWordHasUnderline by remember { mutableStateOf(false) }
@@ -4805,6 +4869,36 @@ fun EditorScreenRemoved(
 
     // Pan, Zoom, Rotate and Aspect orientation states
     var activeDraggingId by remember { mutableStateOf<String?>(null) }
+    
+    fun sampleColorFromPage(rx: Float, ry: Float): Color? {
+        try {
+            val scanPath = activePage.backgroundScanPath
+            if (scanPath != null) {
+                val file = java.io.File(scanPath)
+                if (file.exists()) {
+                    val base = AndroidBitmapLoader.load(file.absolutePath)
+                    if (base != null) {
+                        val filtered = if (activePage.filterType != "original") {
+                            viewModel.applyFilterToBitmap(base, activePage.filterType)
+                        } else {
+                            base
+                        }
+                        val px = (rx * filtered.width).toInt().coerceIn(0, filtered.width - 1)
+                        val py = (ry * filtered.height).toInt().coerceIn(0, filtered.height - 1)
+                        val pixelColor = filtered.getPixel(px, py)
+                        if (filtered != base) {
+                            filtered.recycle()
+                        }
+                        base.recycle()
+                        return Color(pixelColor)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return null
+    }
     var scale by remember(activePage.id) { mutableStateOf(1f) }
     var offsetX by remember(activePage.id) { mutableStateOf(0f) }
     var offsetY by remember(activePage.id) { mutableStateOf(0f) }
@@ -5365,7 +5459,7 @@ fun EditorScreenRemoved(
                                         }
                                     }
 
-                                    if (showAnnotateColorPicker) {
+                                    if (showAnnotateColorPicker && eyedropperTarget == null) {
                                         DrawingColorPickerDialog(
                                             initialColorHex = drawColorHex,
                                             onDismissRequest = { showAnnotateColorPicker = false },
@@ -5380,6 +5474,10 @@ fun EditorScreenRemoved(
                                                         viewModel.editActivePageDrawings(currentDrawings.toList())
                                                     }
                                                 }
+                                            },
+                                            onEyedropperClick = {
+                                                eyedropperTarget = "draw_ink"
+                                                showAnnotateColorPicker = false
                                             }
                                         )
                                     }
@@ -6239,6 +6337,63 @@ fun EditorScreenRemoved(
                 .padding(padding)
                 .background(Color(0xFF0F172A)) // Premium deep charcoal canvas desk workspace
         ) {
+            if (eyedropperTarget != null) {
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .shadow(4.dp, RoundedCornerShape(8.dp)),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Colorize,
+                                contentDescription = "Eyedropper",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Column {
+                                val targetName = when (eyedropperTarget) {
+                                    "draw_ink" -> "Drawing Ink Color"
+                                    "text_color_add" -> "Text Color"
+                                    "bg_color_add" -> "Text Background Color"
+                                    "text_color_edit" -> "Text Color"
+                                    "bg_color_edit" -> "Text Background Color"
+                                    else -> "Color"
+                                }
+                                Text(
+                                    text = "Pick $targetName",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp
+                                )
+                                Text(
+                                    text = "Tap anywhere on the document page below to select.",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                                )
+                            }
+                        }
+                        TextButton(
+                            onClick = { eyedropperTarget = null },
+                            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.primary)
+                        ) {
+                            Text("Cancel", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
             // Central Document Page A4 Canvas sheet
             BoxWithConstraints(
                 modifier = Modifier
@@ -6983,6 +7138,62 @@ fun EditorScreenRemoved(
                         }
                     }
                 )
+                if (eyedropperTarget != null) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.15f))
+                            .pointerInput(eyedropperTarget) {
+                                detectTapGestures { offset ->
+                                    val rx = offset.x / size.width
+                                    val ry = offset.y / size.height
+                                    val sampled = sampleColorFromPage(rx, ry)
+                                    if (sampled != null) {
+                                        val hex = String.format("#%02X%02X%02X", (sampled.red * 255).toInt(), (sampled.green * 255).toInt(), (sampled.blue * 255).toInt())
+                                        when (eyedropperTarget) {
+                                            "draw_ink" -> {
+                                                drawColorHex = hex
+                                                val selId = selectedDrawingId
+                                                if (selId != null) {
+                                                    val idx = currentDrawings.indexOfFirst { it.id == selId }
+                                                    if (idx != -1) {
+                                                        val updatedDraw = currentDrawings[idx].copy(colorHex = hex)
+                                                        currentDrawings[idx] = updatedDraw
+                                                        viewModel.editActivePageDrawings(currentDrawings.toList())
+                                                    }
+                                                }
+                                            }
+                                            "text_color_add" -> {
+                                                addWordColorHex = hex
+                                            }
+                                            "bg_color_add" -> {
+                                                addWordBgColorHex = hex
+                                            }
+                                            "text_color_edit" -> {
+                                                editWordColorHex = hex
+                                            }
+                                            "bg_color_edit" -> {
+                                                editWordBgColorHex = hex
+                                            }
+                                        }
+                                    }
+                                    eyedropperTarget = null
+                                }
+                            }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Colorize,
+                            contentDescription = "Eyedropper Tool",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier
+                                .size(48.dp)
+                                .align(Alignment.Center)
+                                .shadow(6.dp, CircleShape)
+                                .background(Color.White, CircleShape)
+                                .padding(8.dp)
+                        )
+                    }
+                }
             }
         }
     } // Close the 'else' block for isContinuousScrollMode
@@ -7063,7 +7274,7 @@ fun EditorScreenRemoved(
             )
         }
 
-        if (showAddWordDialog) {
+        if (showAddWordDialog && eyedropperTarget == null) {
             AlertDialog(
                 onDismissRequest = { 
                     showAddWordDialog = false
@@ -7260,11 +7471,15 @@ fun EditorScreenRemoved(
                             }
                         }
 
-                        if (showAddWordColorPicker) {
+                        if (showAddWordColorPicker && eyedropperTarget == null) {
                             DrawingColorPickerDialog(
                                 initialColorHex = addWordColorHex,
                                 onDismissRequest = { showAddWordColorPicker = false },
-                                onColorSelected = { selectedHex -> addWordColorHex = selectedHex }
+                                onColorSelected = { selectedHex -> addWordColorHex = selectedHex },
+                                onEyedropperClick = {
+                                    eyedropperTarget = "text_color_add"
+                                    showAddWordColorPicker = false
+                                }
                             )
                         }
 
@@ -7333,11 +7548,15 @@ fun EditorScreenRemoved(
                             }
                         }
 
-                        if (showAddWordBgColorPicker) {
+                        if (showAddWordBgColorPicker && eyedropperTarget == null) {
                             DrawingColorPickerDialog(
                                 initialColorHex = if (addWordBgColorHex.lowercase() == "transparent" || addWordBgColorHex.isBlank()) "#FFFFFF" else addWordBgColorHex,
                                 onDismissRequest = { showAddWordBgColorPicker = false },
-                                onColorSelected = { selectedHex -> addWordBgColorHex = selectedHex }
+                                onColorSelected = { selectedHex -> addWordBgColorHex = selectedHex },
+                                onEyedropperClick = {
+                                    eyedropperTarget = "bg_color_add"
+                                    showAddWordBgColorPicker = false
+                                }
                             )
                         }
 
@@ -7635,7 +7854,7 @@ fun EditorScreenRemoved(
             )
         }
 
-        if (showEditWordDialog && selectedWordToEdit != null) {
+        if (showEditWordDialog && selectedWordToEdit != null && eyedropperTarget == null) {
             AlertDialog(
                 onDismissRequest = { showEditWordDialog = false },
                 title = { Text("Text Annotation", fontWeight = FontWeight.Bold) },
@@ -7829,11 +8048,15 @@ fun EditorScreenRemoved(
                             }
                         }
 
-                        if (showEditWordColorPicker) {
+                        if (showEditWordColorPicker && eyedropperTarget == null) {
                             DrawingColorPickerDialog(
                                 initialColorHex = editWordColorHex,
                                 onDismissRequest = { showEditWordColorPicker = false },
-                                onColorSelected = { selectedHex -> editWordColorHex = selectedHex }
+                                onColorSelected = { selectedHex -> editWordColorHex = selectedHex },
+                                onEyedropperClick = {
+                                    eyedropperTarget = "text_color_edit"
+                                    showEditWordColorPicker = false
+                                }
                             )
                         }
 
@@ -7902,11 +8125,15 @@ fun EditorScreenRemoved(
                             }
                         }
 
-                        if (showEditWordBgColorPicker) {
+                        if (showEditWordBgColorPicker && eyedropperTarget == null) {
                             DrawingColorPickerDialog(
                                 initialColorHex = if (editWordBgColorHex.lowercase() == "transparent" || editWordBgColorHex.isBlank()) "#FFFFFF" else editWordBgColorHex,
                                 onDismissRequest = { showEditWordBgColorPicker = false },
-                                onColorSelected = { selectedHex -> editWordBgColorHex = selectedHex }
+                                onColorSelected = { selectedHex -> editWordBgColorHex = selectedHex },
+                                onEyedropperClick = {
+                                    eyedropperTarget = "bg_color_edit"
+                                    showEditWordBgColorPicker = false
+                                }
                             )
                         }
 
@@ -8790,7 +9017,7 @@ fun MergerScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Acrobat Combine PDF Workbench", fontWeight = FontWeight.Bold) },
+                title = { Text("Combine Workbench", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = { viewModel.navigateTo(Screen.Dashboard) }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Dashboard")
