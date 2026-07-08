@@ -1448,7 +1448,7 @@ fun SignatureProfileItem(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .aspectRatio(2f)
+                        .aspectRatio(com.example.data.SignaturePathUtils.STUDIO_CANVAS_ASPECT_RATIO)
                         .background(Color.White, RoundedCornerShape(8.dp))
                         .border(1.dp, Color.LightGray, RoundedCornerShape(8.dp))
                         .padding(16.dp),
@@ -1477,31 +1477,7 @@ fun SignatureProfileItem(
                         Canvas(modifier = Modifier.fillMaxSize()) {
                             val points = DocumentSerializer.pointsFromJson(sig.pathDataJson)
                             if (points.isNotEmpty()) {
-                                val path = Path()
-                                val first = points.first()
-                                path.moveTo(first.x * size.width, first.y * size.height)
-                                
-                                for (i in 1 until points.size) {
-                                    val p = points[i]
-                                    if (p.x == -1f && p.y == -1f) {
-                                        if (i + 1 < points.size) {
-                                            val next = points[i + 1]
-                                            path.moveTo(next.x * size.width, next.y * size.height)
-                                        }
-                                    } else {
-                                        path.lineTo(p.x * size.width, p.y * size.height)
-                                    }
-                                }
-                                val baseScale = size.width / 500f
-                                drawPath(
-                                    path = path,
-                                    color = Color(android.graphics.Color.parseColor(sig.colorHex)),
-                                    style = Stroke(
-                                        width = (sig.strokeWidth * baseScale).coerceAtLeast(1.5f),
-                                        cap = StrokeCap.Round,
-                                        join = StrokeJoin.Round
-                                    )
-                                )
+                                drawSavedSignature(points, sig.colorHex, sig.strokeWidth, sig.penType, size)
                             }
                         }
                     }
@@ -1537,7 +1513,7 @@ fun SignatureProfileItem(
                 Box(
                     modifier = Modifier
                         .width(160.dp)
-                        .height(80.dp)
+                        .aspectRatio(com.example.data.SignaturePathUtils.STUDIO_CANVAS_ASPECT_RATIO)
                         .background(Color.White, RoundedCornerShape(6.dp))
                         .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(6.dp))
                         .padding(4.dp)
@@ -1565,31 +1541,7 @@ fun SignatureProfileItem(
                         Canvas(modifier = Modifier.fillMaxSize()) {
                             val points = DocumentSerializer.pointsFromJson(sig.pathDataJson)
                             if (points.isNotEmpty()) {
-                                val path = Path()
-                                val first = points.first()
-                                path.moveTo(first.x * size.width, first.y * size.height)
-                                
-                                for (i in 1 until points.size) {
-                                    val p = points[i]
-                                    if (p.x == -1f && p.y == -1f) {
-                                        if (i + 1 < points.size) {
-                                            val next = points[i + 1]
-                                            path.moveTo(next.x * size.width, next.y * size.height)
-                                        }
-                                    } else {
-                                        path.lineTo(p.x * size.width, p.y * size.height)
-                                    }
-                                }
-                                val baseScale = size.width / 500f
-                                drawPath(
-                                    path = path,
-                                    color = Color(android.graphics.Color.parseColor(sig.colorHex)),
-                                    style = Stroke(
-                                        width = (sig.strokeWidth * baseScale).coerceAtLeast(1.5f),
-                                        cap = StrokeCap.Round,
-                                        join = StrokeJoin.Round
-                                    )
-                                )
+                                drawSavedSignature(points, sig.colorHex, sig.strokeWidth, sig.penType, size)
                             }
                         }
                     }
@@ -1952,7 +1904,8 @@ fun SignatureStudioScreen(
                                         aliasText.text,
                                         flattenedPoints.toList(),
                                         selectedColor,
-                                        selectedThickness
+                                        selectedThickness,
+                                        selectedPenType
                                     )
                                     strokes.clear()
                                     redoStrokes.clear()
@@ -2856,6 +2809,42 @@ fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCanvasTemplateBackgroun
             }
         }
     }
+}
+
+/**
+ * Draws a SAVED signature (from a SignatureProfile) inside a Compose Canvas, reusing the
+ * exact same smoothing/pen-style logic as the live Signature Studio canvas (drawStroke).
+ * Saved points may contain multiple sub-strokes separated by (-1,-1) pen-lift markers, so
+ * this splits on those markers and draws each sub-stroke individually — this is what the
+ * old inline preview code (straight lineTo segments, no pen-lift handling, no penType
+ * styling) was missing, which is why stored signature previews looked different from the
+ * editor/canvas.
+ */
+fun androidx.compose.ui.graphics.drawscope.DrawScope.drawSavedSignature(
+    points: List<PointDef>,
+    colorHex: String,
+    thickness: Float,
+    penType: String,
+    size: androidx.compose.ui.geometry.Size
+) {
+    var subStroke = mutableListOf<PointDef>()
+    fun flush() {
+        if (subStroke.size >= 2) {
+            drawStroke(
+                CanvasStroke(points = subStroke.toList(), colorHex = colorHex, thickness = thickness, penType = penType),
+                size
+            )
+        }
+        subStroke = mutableListOf()
+    }
+    for (pt in points) {
+        if (pt.x == -1f && pt.y == -1f) {
+            flush()
+        } else {
+            subStroke.add(pt)
+        }
+    }
+    flush()
 }
 
 fun androidx.compose.ui.graphics.drawscope.DrawScope.drawStroke(stroke: CanvasStroke, size: androidx.compose.ui.geometry.Size) {
@@ -4185,7 +4174,7 @@ fun ScanEditScreen(
                                             val targetPixelWidth = (cropRight - newLeft) * bitmapWidth
                                             val targetPixelHeight = targetPixelWidth / targetRatio
                                             var newBottom = cropTop + (targetPixelHeight / bitmapHeight)
-                                            
+
                                             if (newBottom > 1f) {
                                                 newBottom = 1f
                                                 val allowedPixelHeight = (newBottom - cropTop) * bitmapHeight
@@ -4197,7 +4186,7 @@ fun ScanEditScreen(
                                                 val allowedPixelWidth = allowedPixelHeight * targetRatio
                                                 newLeft = cropRight - (allowedPixelWidth / bitmapWidth)
                                             }
-                                            
+
                                             cropLeft = newLeft.coerceIn(0f, cropRight - 0.05f)
                                             cropBottom = newBottom.coerceIn(cropTop + 0.05f, 1f)
                                         }
@@ -4367,24 +4356,24 @@ fun ScanEditScreen(
             }
         }
     }
-}
+    }
 
-// Helper to draw clean borders
-fun BorderStroke(iif: Boolean, col: Color, defaultCol: Color) = BorderStroke(
+    // Helper to draw clean borders
+    fun BorderStroke(iif: Boolean, col: Color, defaultCol: Color) = BorderStroke(
     width = if (iif) 2.dp else 1.dp,
     color = if (iif) col else defaultCol
-)
+    )
 
 
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun DrawingColorPickerDialog(
+    @OptIn(ExperimentalMaterial3Api::class)
+    @Composable
+    fun DrawingColorPickerDialog(
     initialColorHex: String,
     onDismissRequest: () -> Unit,
     onColorSelected: (String) -> Unit,
     onEyedropperClick: (() -> Unit)? = null
-) {
+    ) {
     var rValue by remember { mutableFloatStateOf(0f) }
     var gValue by remember { mutableFloatStateOf(0f) }
     var bValue by remember { mutableFloatStateOf(0f) }
@@ -4526,10 +4515,10 @@ fun DrawingColorPickerDialog(
                 // Swatches
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("Swatches:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.secondary)
-                    
+
                     val row1 = listOf("#F43F5E", "#EC4899", "#D946EF", "#8B5CF6", "#6366F1", "#3B82F6", "#0EA5E9", "#06B6D4")
                     val row2 = listOf("#14B8A6", "#10B981", "#22C55E", "#84CC16", "#EAB308", "#F97316", "#EF4444", "#000000")
-                    
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -4595,18 +4584,18 @@ fun DrawingColorPickerDialog(
             }
         }
     )
-}
+    }
 
 
-@Composable
-fun DrawingSettingsToolbar(
+    @Composable
+    fun DrawingSettingsToolbar(
     drawColorHex: String,
     onColorSelected: (String) -> Unit,
     drawStrokeWidth: Float,
     onStrokeWidthChanged: (Float) -> Unit,
     drawPenType: String,
     onPenTypeChanged: (String) -> Unit
-) {
+    ) {
     var showColorPicker by remember { mutableStateOf(false) }
 
     if (showColorPicker) {
@@ -4641,7 +4630,7 @@ fun DrawingSettingsToolbar(
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                
+
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -4758,36 +4747,36 @@ fun DrawingSettingsToolbar(
             }
         }
     }
-}
+    }
 
 
-// —-- 5. RICH PDF CANVAS EDITOR & ANNOTATOR SCREEN —--
+    // —-- 5. RICH PDF CANVAS EDITOR & ANNOTATOR SCREEN —--
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun EditorScreen(
+    @OptIn(ExperimentalMaterial3Api::class)
+    @Composable
+    fun EditorScreen(
     state: UiState,
     viewModel: MainViewModel
-) {
+    ) {
     EditorScreenRemoved(state, viewModel)
-}
+    }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun EditorScreenRemoved(
+    @OptIn(ExperimentalMaterial3Api::class)
+    @Composable
+    fun EditorScreenRemoved(
     state: UiState,
     viewModel: MainViewModel
-) {
+    ) {
     val activeDoc = state.activeDocument ?: return
     val context = LocalContext.current
     val pages = state.activeDocumentContent.pages
     val activePage = pages.find { it.id == state.activePageId } ?: pages.firstOrNull() ?: return
-    
+
     var showDeletePageConfirm by remember { mutableStateOf(false) }
     var showCloseConfirmDialog by remember { mutableStateOf(false) }
     var showPageEditorControls by remember { mutableStateOf(true) }
     var showPageWorkbench by remember { mutableStateOf(false) }
-    
+
     var showSignatureSelectionDrawer by remember { mutableStateOf(false) }
     var showFilterDropdown by remember { mutableStateOf(false) }
     var annotationMode by remember { mutableStateOf("none") } // "none", "draw", "erase", "signature_overlay"
@@ -4799,7 +4788,7 @@ fun EditorScreenRemoved(
     var selectedDrawingId by remember { mutableStateOf<String?>(null) }
     var textStickerDraft by remember { mutableStateOf("") }
     var isAddingTextMode by remember { mutableStateOf(false) }
- 
+
     var showPreciseTextPlacementDialog by remember { mutableStateOf(false) }
     var precisePageNumberText by remember { mutableStateOf("") }
     var preciseXText by remember { mutableStateOf("0.50") }
@@ -4810,12 +4799,12 @@ fun EditorScreenRemoved(
     var selectedWordToEdit by remember { mutableStateOf<TextAnnotationDef?>(null) }
     var selectedAnnotationId by remember { mutableStateOf<String?>(null) }
     var editWordTextDraft by remember { mutableStateOf("") }
- 
+
     var showAddWordColorPicker by remember { mutableStateOf(false) }
     var showAddWordBgColorPicker by remember { mutableStateOf(false) }
     var showEditWordColorPicker by remember { mutableStateOf(false) }
     var showEditWordBgColorPicker by remember { mutableStateOf(false) }
- 
+
     var showAddWordDialog by remember { mutableStateOf(false) }
     var addWordX by remember { mutableFloatStateOf(0f) }
     var addWordY by remember { mutableFloatStateOf(0f) }

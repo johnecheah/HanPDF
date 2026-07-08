@@ -1308,7 +1308,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // --- SIGNATURE WORKSPACE CREATOR ---
-    fun saveDrawnSignature(alias: String, points: List<PointDef>, strokeColor: String, strokeWidth: Float) {
+    fun saveDrawnSignature(alias: String, points: List<PointDef>, strokeColor: String, strokeWidth: Float, penType: String = "pen") {
         viewModelScope.launch {
             val jsonPoints = DocumentSerializer.pointsToJson(points)
             val name = alias.ifBlank { "Signature #${_uiState.value.signatures.size + 1}" }
@@ -1316,7 +1316,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 alias = name,
                 pathDataJson = jsonPoints,
                 colorHex = strokeColor,
-                strokeWidth = strokeWidth
+                strokeWidth = strokeWidth,
+                penType = penType
             )
             val insertedId = repo.insertSignature(signature)
             // Automatically prompt/export 300 PPI image of the drawn signature!

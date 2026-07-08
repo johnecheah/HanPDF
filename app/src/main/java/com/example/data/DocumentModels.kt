@@ -25,7 +25,8 @@ data class SignatureProfile(
     val pathDataJson: String, // Stringified coordinates for restoring smooth vector drawing
     val colorHex: String = "#000000",
     val strokeWidth: Float = 8f,
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    val penType: String = "pen"
 )
 
 // --- ROOM DAOs ---
@@ -71,7 +72,7 @@ interface SignatureDao {
 
 // --- APP DATABASE ---
 
-@Database(entities = [Document::class, SignatureProfile::class], version = 2, exportSchema = false)
+@Database(entities = [Document::class, SignatureProfile::class], version = 3, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun documentDao(): DocumentDao
     abstract fun signatureDao(): SignatureDao

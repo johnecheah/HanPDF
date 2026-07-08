@@ -10,6 +10,7 @@ import android.graphics.Path
  * Points of exactly (-1, -1) mark a pen lift / new sub-stroke boundary.
  */
 object SignaturePathUtils {
+    const val STUDIO_CANVAS_ASPECT_RATIO = 2.1f
 
     fun buildSmoothedPath(points: List<PointDef>, width: Float, height: Float): Path {
         val path = Path()
