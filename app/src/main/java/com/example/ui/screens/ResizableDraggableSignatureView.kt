@@ -59,6 +59,7 @@ class ResizableDraggableSignatureView @JvmOverloads constructor(
 
     // Vector drawing points cache
     private var vectorPoints: List<com.example.data.PointDef> = emptyList()
+    private var baseStrokeWidth = 4f
     private var vectorPaint = Paint().apply {
         style = Paint.Style.STROKE
         strokeCap = Paint.Cap.ROUND
@@ -111,7 +112,8 @@ class ResizableDraggableSignatureView @JvmOverloads constructor(
                 android.graphics.Color.BLACK
             }
             vectorPaint.color = parsedColor
-            vectorPaint.strokeWidth = profile.strokeWidth.coerceAtLeast(4f)
+            baseStrokeWidth = profile.strokeWidth
+            vectorPaint.strokeWidth = (baseStrokeWidth * (width.toFloat() / 500f)).coerceAtLeast(4f)
         }
         invalidate()
     }
@@ -206,6 +208,7 @@ class ResizableDraggableSignatureView @JvmOverloads constructor(
             val destRect = RectF(0f, 0f, width.toFloat(), height.toFloat())
             canvas.drawBitmap(bmp, null, destRect, null)
         } else if (vectorPoints.isNotEmpty()) {
+            vectorPaint.strokeWidth = (baseStrokeWidth * (width.toFloat() / 500f)).coerceAtLeast(4f)
             val path = com.example.data.SignaturePathUtils.buildSmoothedPath(
                 vectorPoints, width.toFloat(), height.toFloat()
             )

@@ -1492,11 +1492,12 @@ fun SignatureProfileItem(
                                         path.lineTo(p.x * size.width, p.y * size.height)
                                     }
                                 }
+                                val baseScale = size.width / 500f
                                 drawPath(
                                     path = path,
                                     color = Color(android.graphics.Color.parseColor(sig.colorHex)),
                                     style = Stroke(
-                                        width = sig.strokeWidth * (size.width / 200f).coerceAtLeast(1.5f),
+                                        width = (sig.strokeWidth * baseScale).coerceAtLeast(1.5f),
                                         cap = StrokeCap.Round,
                                         join = StrokeJoin.Round
                                     )
@@ -1579,11 +1580,12 @@ fun SignatureProfileItem(
                                         path.lineTo(p.x * size.width, p.y * size.height)
                                     }
                                 }
+                                val baseScale = size.width / 500f
                                 drawPath(
                                     path = path,
                                     color = Color(android.graphics.Color.parseColor(sig.colorHex)),
                                     style = Stroke(
-                                        width = sig.strokeWidth * (size.width / 200f).coerceAtLeast(1.5f),
+                                        width = (sig.strokeWidth * baseScale).coerceAtLeast(1.5f),
                                         cap = StrokeCap.Round,
                                         join = StrokeJoin.Round
                                     )
@@ -2862,15 +2864,9 @@ fun androidx.compose.ui.graphics.drawscope.DrawScope.drawStroke(stroke: CanvasSt
 
     val baseColor = try {
         Color(android.graphics.Color.parseColor(stroke.colorHex))
-    } catch (e: Exception) {
-        Color.Black
-    }
+    } catch (e: Exception) { Color.Black }
 
-    val drawColor = if (stroke.penType == "highlighter") {
-        baseColor.copy(alpha = 0.35f)
-    } else {
-        baseColor
-    }
+    val drawColor = if (stroke.penType == "highlighter") baseColor.copy(alpha = 0.35f) else baseColor
 
     val path = Path()
     val first = points.first()
@@ -2883,34 +2879,32 @@ fun androidx.compose.ui.graphics.drawscope.DrawScope.drawStroke(stroke: CanvasSt
             val midX = (prev.x + p.x) / 2f
             val midY = (prev.y + p.y) / 2f
             path.quadraticTo(
-                prev.x * size.width,
-                prev.y * size.height,
-                midX * size.width,
-                midY * size.height
+                prev.x * size.width, prev.y * size.height,
+                midX * size.width, midY * size.height
             )
         }
         val last = points.last()
         path.lineTo(last.x * size.width, last.y * size.height)
     }
 
-    val finalThickness = if (stroke.penType == "highlighter") {
-        stroke.thickness * 4.5f
-    } else {
-        stroke.thickness
+    // KEY FIX: Consistent base scaling (assume ~500px logical width for signatures)
+    val baseScale = size.width / 500f
+    val finalThickness = (stroke.thickness * baseScale).coerceAtLeast(1.5f) * when (stroke.penType) {
+        "highlighter" -> 4.5f
+        "calligraphy" -> 1.3f
+        else -> 1f
     }
 
     val pathEffect = if (stroke.penType == "dashed") {
         androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(15f, 15f), 0f)
-    } else {
-        null
-    }
+    } else null
 
     if (stroke.penType == "calligraphy") {
         drawPath(
             path = path,
             color = drawColor,
             style = Stroke(
-                width = finalThickness * 1.3f,
+                width = finalThickness,
                 cap = StrokeCap.Square,
                 join = StrokeJoin.Miter,
                 pathEffect = pathEffect
