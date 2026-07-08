@@ -877,7 +877,7 @@ fun DashboardScreen(
                         Spacer(modifier = Modifier.height(18.dp))
                         
                         Text(
-                            text = "Created by\nJohne Cheah\n@2026\n \nVersion V1.2",
+                            text = "Created by\nJohne Cheah\n@2026\n \nVersion V1.3",
                             fontSize = 15.sp,
                             lineHeight = 22.sp,
                             fontWeight = FontWeight.Bold,
@@ -2878,7 +2878,7 @@ fun androidx.compose.ui.graphics.drawscope.DrawScope.drawStroke(stroke: CanvasSt
 
     // KEY FIX: Consistent base scaling (assume ~500px logical width for signatures)
     val baseScale = size.width / 500f
-    val finalThickness = (stroke.thickness * baseScale).coerceAtLeast(1.5f) * when (stroke.penType) {
+    val finalThickness = (stroke.thickness * baseScale).coerceAtLeast(4f) * when (stroke.penType) {
         "highlighter" -> 4.5f
         "calligraphy" -> 1.3f
         else -> 1f
