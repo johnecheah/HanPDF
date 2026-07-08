@@ -5878,6 +5878,11 @@ fun ScanEditScreen(
                                                             } catch (e: Exception) {
                                                                 e.printStackTrace()
                                                             }
+                                                        } else {
+                                                            // Drawn (vector) signature: points are normalized against the
+                                                            // FULL Signature Studio canvas, so the placement box must use
+                                                            // that same aspect ratio or the strokes render shifted/stretched.
+                                                            finalHeight = finalWidth / com.example.data.SignaturePathUtils.STUDIO_CANVAS_ASPECT_RATIO
                                                         }
 
                                                         val overlay = SignatureOverlayDef(
@@ -7219,6 +7224,11 @@ fun ScanEditScreen(
                                                 } catch (e: Exception) {
                                                     e.printStackTrace()
                                                 }
+                                            } else {
+                                                // Drawn (vector) signature: points are normalized against the
+                                                // FULL Signature Studio canvas, so the placement box must use
+                                                // that same aspect ratio or the strokes render shifted/stretched.
+                                                finalHeight = finalWidth / com.example.data.SignaturePathUtils.STUDIO_CANVAS_ASPECT_RATIO
                                             }
 
                                             val overlay = SignatureOverlayDef(

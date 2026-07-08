@@ -60,6 +60,7 @@ class ResizableDraggableSignatureView @JvmOverloads constructor(
     // Vector drawing points cache
     private var vectorPoints: List<com.example.data.PointDef> = emptyList()
     private var baseStrokeWidth = 4f
+    private var vectorPenType: String = "pen"
     private var vectorPaint = Paint().apply {
         style = Paint.Style.STROKE
         strokeCap = Paint.Cap.ROUND
@@ -113,9 +114,18 @@ class ResizableDraggableSignatureView @JvmOverloads constructor(
             }
             vectorPaint.color = parsedColor
             baseStrokeWidth = profile.strokeWidth
-            vectorPaint.strokeWidth = (baseStrokeWidth * (width.toFloat() / 500f)).coerceAtLeast(4f)
+            vectorPenType = profile.penType
+            applyVectorPaintStyle()
         }
         invalidate()
+    }
+
+    private fun applyVectorPaintStyle() {
+        val base = (baseStrokeWidth * (width.toFloat() / com.example.data.SignaturePathUtils.BASE_SCALE_WIDTH)).coerceAtLeast(4f)
+        vectorPaint.strokeWidth = base * com.example.data.SignaturePathUtils.thicknessMultiplier(vectorPenType)
+        vectorPaint.alpha = com.example.data.SignaturePathUtils.alphaForPenType(vectorPenType)
+        val dash = com.example.data.SignaturePathUtils.dashIntervals(vectorPenType)
+        vectorPaint.pathEffect = if (dash != null) android.graphics.DashPathEffect(dash, 0f) else null
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -208,11 +218,19 @@ class ResizableDraggableSignatureView @JvmOverloads constructor(
             val destRect = RectF(0f, 0f, width.toFloat(), height.toFloat())
             canvas.drawBitmap(bmp, null, destRect, null)
         } else if (vectorPoints.isNotEmpty()) {
-            vectorPaint.strokeWidth = (baseStrokeWidth * (width.toFloat() / 500f)).coerceAtLeast(4f)
+            applyVectorPaintStyle()
             val path = com.example.data.SignaturePathUtils.buildSmoothedPath(
                 vectorPoints, width.toFloat(), height.toFloat()
             )
             canvas.drawPath(path, vectorPaint)
+            if (vectorPenType == "calligraphy") {
+                val offsetPath = android.graphics.Path(path).apply { offset(1.5f, 1.5f) }
+                val offsetPaint = Paint(vectorPaint).apply {
+                    alpha = (vectorPaint.alpha * 0.7f).toInt()
+                    strokeWidth = vectorPaint.strokeWidth * 0.7f
+                }
+                canvas.drawPath(offsetPath, offsetPaint)
+            }
         }
 
         // Selected bounding borders and control handles

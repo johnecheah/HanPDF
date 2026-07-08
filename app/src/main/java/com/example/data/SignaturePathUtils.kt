@@ -12,6 +12,28 @@ import android.graphics.Path
 object SignaturePathUtils {
     const val STUDIO_CANVAS_ASPECT_RATIO = 2.1f
 
+    /**
+     * Logical canvas width the Signature Studio and every downstream renderer scale
+     * stroke thickness against. Every place that draws a saved signature (the editor
+     * overlay, the final PDF export) MUST use this same base so thickness stays
+     * consistent from the moment it's drawn to the moment it's saved.
+     */
+    const val BASE_SCALE_WIDTH = 500f
+
+    /** Extra thickness multiplier per pen type, matching Signature Studio's live canvas. */
+    fun thicknessMultiplier(penType: String): Float = when (penType) {
+        "highlighter" -> 4.5f
+        "calligraphy" -> 1.3f
+        else -> 1f
+    }
+
+    /** Stroke alpha (0..255) for a given pen type. */
+    fun alphaForPenType(penType: String): Int = if (penType == "highlighter") 90 else 255
+
+    /** Dash effect intervals, or null if the pen type isn't dashed. */
+    fun dashIntervals(penType: String): FloatArray? =
+        if (penType == "dashed") floatArrayOf(15f, 15f) else null
+
     fun buildSmoothedPath(points: List<PointDef>, width: Float, height: Float): Path {
         val path = Path()
         var subStroke = mutableListOf<PointDef>()

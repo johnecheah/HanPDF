@@ -404,22 +404,33 @@ object PdfGenerator {
         val points = DocumentSerializer.pointsFromJson(sig.pathDataJson)
         if (points.isEmpty()) return
 
+        val penType = sig.penType
+        val baseWidth = (sig.strokeWidth * (w / com.example.data.SignaturePathUtils.BASE_SCALE_WIDTH)).coerceAtLeast(4f)
         val sigPaint = Paint().apply {
             color = Color.parseColor(sig.colorHex)
             style = Paint.Style.STROKE
             strokeJoin = Paint.Join.ROUND
             strokeCap = Paint.Cap.ROUND
-            strokeWidth = sig.strokeWidth * (w / 160f) // relative width scaling
+            strokeWidth = baseWidth * com.example.data.SignaturePathUtils.thicknessMultiplier(penType)
+            alpha = com.example.data.SignaturePathUtils.alphaForPenType(penType)
+            val dash = com.example.data.SignaturePathUtils.dashIntervals(penType)
+            if (dash != null) pathEffect = android.graphics.DashPathEffect(dash, 0f)
             isAntiAlias = true
         }
 
-        // Signature vector coordinates are formatted as normalized coords inside signature builder workspace (0..1)
-        // Draw the path translated to signature bounds (x, y, w, h)
         val smoothed = DocumentSerializer.let {
             com.example.data.SignaturePathUtils.buildSmoothedPath(points, w, h)
         }
-        // Translate into place since buildSmoothedPath assumes an origin of (0,0)
         smoothed.offset(x, y)
         canvas.drawPath(smoothed, sigPaint)
+
+        if (penType == "calligraphy") {
+            val offsetPath = Path(smoothed).apply { offset(1.5f, 1.5f) }
+            val offsetPaint = Paint(sigPaint).apply {
+                alpha = (sigPaint.alpha * 0.7f).toInt()
+                strokeWidth = sigPaint.strokeWidth * 0.7f
+            }
+            canvas.drawPath(offsetPath, offsetPaint)
+        }
     }
 }
