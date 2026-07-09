@@ -810,7 +810,7 @@ fun DashboardScreen(
         if (showCreateDialog) {
             AlertDialog(
                 onDismissRequest = { showCreateDialog = false },
-                title = { Text("Assemble New Document", fontWeight = FontWeight.Bold) },
+                title = { Text("New Document", fontWeight = FontWeight.Bold) },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                         Text("Select a structured paper layout or standard template:", fontSize = 14.sp)
@@ -830,6 +830,15 @@ fun DashboardScreen(
                                 modifier = Modifier.weight(1f),
                                 onClick = {
                                     viewModel.createWordDoc("Blank Doc")
+                                    showCreateDialog = false
+                                }
+                            )
+                            TemplateCardButton(
+                                icon = Icons.Default.Collections,
+                                label = "Collage",
+                                modifier = Modifier.weight(1f),
+                                onClick = {
+                                    viewModel.createNewTemplateDocument("Collage Image", "collage")
                                     showCreateDialog = false
                                 }
                             )
@@ -4920,6 +4929,31 @@ fun ScanEditScreen(
         }
     }
 
+    var isCollagePickingTop by remember { mutableStateOf(true) }
+
+    val collagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            try {
+                val inputStream = context.contentResolver.openInputStream(uri)
+                if (inputStream != null) {
+                    val dir = context.getExternalFilesDir(android.os.Environment.DIRECTORY_PICTURES) ?: context.filesDir
+                    val file = java.io.File(dir, "collage_img_${System.currentTimeMillis()}.png")
+                    java.io.FileOutputStream(file).use { outputStream ->
+                        inputStream.copyTo(outputStream)
+                    }
+                    inputStream.close()
+                    val newItem = com.example.data.CollageItemDef(imagePath = file.absolutePath)
+                    viewModel.updateCollageItem(isCollagePickingTop, newItem)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                android.widget.Toast.makeText(context, "Failed to load collage image: ${e.localizedMessage}", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     val coroutineScope = rememberCoroutineScope()
 
     var activeEditorTab by remember { mutableStateOf("view") }
@@ -5959,16 +5993,57 @@ fun ScanEditScreen(
                                 ) {
                                     Text("Page Manager & Reorder", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                                     
-                                    Button(
-                                        onClick = { editorFilePickerLauncher.launch("*/*") },
-                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                                        shape = RoundedCornerShape(6.dp),
-                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                        modifier = Modifier.height(26.dp)
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Icon(Icons.Default.AddCircle, null, modifier = Modifier.size(12.dp))
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text("Append Page", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        Button(
+                                            onClick = { editorFilePickerLauncher.launch("*/*") },
+                                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                                            shape = RoundedCornerShape(6.dp),
+                                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                            modifier = Modifier.height(28.dp)
+                                        ) {
+                                            Icon(Icons.Default.Add, null, modifier = Modifier.size(11.dp))
+                                            Spacer(modifier = Modifier.width(3.dp))
+                                            Text("Page", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        }
+
+                                        Button(
+                                            onClick = { viewModel.addCollagePageToEditor() },
+                                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+                                            shape = RoundedCornerShape(6.dp),
+                                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                            modifier = Modifier.height(28.dp)
+                                        ) {
+                                            Icon(Icons.Default.Add, null, modifier = Modifier.size(11.dp))
+                                            Spacer(modifier = Modifier.width(3.dp))
+                                            Text("Collage", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        }
+
+                                        Button(
+                                            onClick = { viewModel.addNewPageToEditor("blank") },
+                                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary),
+                                            shape = RoundedCornerShape(6.dp),
+                                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                            modifier = Modifier.height(28.dp)
+                                        ) {
+                                            Icon(Icons.Default.Add, null, modifier = Modifier.size(11.dp))
+                                            Spacer(modifier = Modifier.width(3.dp))
+                                            Text("Note", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        }
+
+                                        Button(
+                                            onClick = { viewModel.addNewPageToEditor("word") },
+                                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer),
+                                            shape = RoundedCornerShape(6.dp),
+                                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                            modifier = Modifier.height(28.dp)
+                                        ) {
+                                            Icon(Icons.Default.Add, null, modifier = Modifier.size(11.dp))
+                                            Spacer(modifier = Modifier.width(3.dp))
+                                            Text("Doc", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        }
                                     }
                                 }
 
@@ -6391,29 +6466,36 @@ fun ScanEditScreen(
                     .background(Color(0xFF0F172A), RoundedCornerShape(8.dp))
                     .border(BorderStroke(1.dp, Color.DarkGray), RoundedCornerShape(8.dp))
                     .clip(RoundedCornerShape(8.dp))
-                    .pointerInput(activePage.id, annotationMode, isAddingTextMode, activeDraggingId) {
-                        if (annotationMode != "draw" && activeDraggingId == null) {
-                            detectTapGestures(
-                                onDoubleTap = {
-                                    scale = 1f
-                                    offsetX = 0f
-                                    offsetY = 0f
+                    .let { baseModifier ->
+                        if (activePage.type.lowercase() == "collage") {
+                            baseModifier
+                        } else {
+                            baseModifier
+                                .pointerInput(activePage.id, annotationMode, isAddingTextMode, activeDraggingId) {
+                                    if (annotationMode != "draw" && activeDraggingId == null) {
+                                        detectTapGestures(
+                                            onDoubleTap = {
+                                                scale = 1f
+                                                offsetX = 0f
+                                                offsetY = 0f
+                                            }
+                                        )
+                                    }
                                 }
-                            )
-                        }
-                    }
-                    .pointerInput(activePage.id, annotationMode, isAddingTextMode, activeDraggingId) {
-                        if (annotationMode != "draw" && activeDraggingId == null) {
-                            detectTransformGestures { centroid, pan, zoom, rotation ->
-                                scale = (scale * zoom).coerceIn(0.5f, 5f)
-                                if (scale > 1f) {
-                                    offsetX += pan.x
-                                    offsetY += pan.y
-                                } else {
-                                    offsetX = 0f
-                                    offsetY = 0f
+                                .pointerInput(activePage.id, annotationMode, isAddingTextMode, activeDraggingId) {
+                                    if (annotationMode != "draw" && activeDraggingId == null) {
+                                        detectTransformGestures { centroid, pan, zoom, rotation ->
+                                            scale = (scale * zoom).coerceIn(0.5f, 5f)
+                                            if (scale > 1f) {
+                                                offsetX += pan.x
+                                                offsetY += pan.y
+                                            } else {
+                                                offsetX = 0f
+                                                offsetY = 0f
+                                            }
+                                        }
+                                    }
                                 }
-                            }
                         }
                     }
             ) {
@@ -6514,6 +6596,16 @@ fun ScanEditScreen(
                             pageMeasuredHeightPx = heightPx
                         }
 
+                        if (activePage.type.lowercase() == "collage") {
+                            CollageEditorView(
+                                activePage = activePage,
+                                isCollagePickingTop = isCollagePickingTop,
+                                onChangePickingTop = { isCollagePickingTop = it },
+                                collagePickerLauncher = collagePickerLauncher,
+                                viewModel = viewModel
+                            )
+                        }
+
                     // 1. Render Background Scan Image Thumbnail safely AT THE VERY BOTTOM!
                     if (activePage.backgroundScanPath != null) {
                         val file = File(activePage.backgroundScanPath)
@@ -6545,9 +6637,13 @@ fun ScanEditScreen(
                     Canvas(
                         modifier = Modifier
                             .fillMaxSize()
-                            .pointerInput(activePage.id, annotationMode, isAddingTextMode, drawShapeType) {
-                                if (annotationMode == "draw") {
-                                    if (drawShapeType == "select") {
+                            .let { baseModifier ->
+                                if (activePage.type.lowercase() == "collage" && annotationMode == "none" && !isAddingTextMode) {
+                                    baseModifier
+                                } else {
+                                    baseModifier.pointerInput(activePage.id, annotationMode, isAddingTextMode, drawShapeType) {
+                                    if (annotationMode == "draw") {
+                                if (drawShapeType == "select") {
                                         var dragTargetId: String? = null
                                         detectDragGestures(
                                             onDragStart = { offset ->
@@ -6650,6 +6746,8 @@ fun ScanEditScreen(
                                     )
                                 }
                             }
+                        }
+                    }
                     ) {
                     // Draw base templates
                     when (activePage.type.lowercase()) {
@@ -11155,4 +11253,301 @@ fun CameraSignatureScannerDialog(
         }
     }
 }
+
+@Composable
+fun CollagePortionView(
+    isTop: Boolean,
+    item: com.example.data.CollageItemDef?,
+    filterType: String,
+    viewModel: MainViewModel,
+    onPickImageClick: () -> Unit,
+    onUpdateProperties: (rotation: Float, flipH: Boolean, flipV: Boolean, zoom: Float, offX: Float, offY: Float) -> Unit,
+    onDeleteClick: () -> Unit
+) {
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxSize()
+            .graphicsLayer(clip = true)
+    ) {
+        if (item == null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable { onPickImageClick() },
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "Add Image",
+                        tint = Color.Gray,
+                        modifier = Modifier.size(48.dp)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Select Image for ${if (isTop) "Top" else "Bottom"} Half",
+                        color = Color.Gray,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+        } else {
+            val bitmap = remember(item.imagePath, filterType) {
+                try {
+                    val base = BitmapFactory.decodeFile(item.imagePath)
+                    if (base != null && filterType != "original") {
+                        val filtered = viewModel.applyFilterToBitmap(base, filterType)
+                        if (filtered != base) {
+                            base.recycle()
+                        }
+                        filtered
+                    } else {
+                        base
+                    }
+                } catch (e: Exception) {
+                    null
+                }
+            }
+
+            if (bitmap != null) {
+                var scale by remember(item.imagePath) { mutableStateOf(item.scale) }
+                var offset by remember(item.imagePath) { mutableStateOf(Offset(item.offsetX, item.offsetY)) }
+                
+                val rotation = item.rotation
+                val flipH = item.flipHorizontal
+                val flipV = item.flipVertical
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(item.imagePath) {
+                            detectTransformGestures { _, pan, zoomAmount, _ ->
+                                scale = (scale * zoomAmount).coerceIn(0.5f, 5.0f)
+                                offset = offset + pan
+                                onUpdateProperties(rotation, flipH, flipV, scale, offset.x, offset.y)
+                            }
+                        }
+                        .pointerInput(item.imagePath) {
+                            detectTapGestures(
+                                onDoubleTap = {
+                                    val imgW = bitmap.width.toFloat()
+                                    val imgH = bitmap.height.toFloat()
+                                    val containerW = constraints.maxWidth.toFloat()
+                                    val containerH = constraints.maxHeight.toFloat()
+                                    
+                                    val fitScale = minOf(containerW / imgW, containerH / imgH)
+                                    val sW = imgW * fitScale
+                                    val sH = imgH * fitScale
+                                    
+                                    val rad = Math.toRadians(rotation.toDouble())
+                                    val cos = Math.abs(Math.cos(rad))
+                                    val sin = Math.abs(Math.sin(rad))
+                                    val rotW = sW * cos + sH * sin
+                                    val rotH = sW * sin + sH * cos
+                                    
+                                    val finalScale = minOf(containerW / rotW, containerH / rotH).toFloat()
+                                    
+                                    scale = finalScale
+                                    offset = Offset.Zero
+                                    onUpdateProperties(rotation, flipH, flipV, finalScale, 0f, 0f)
+                                }
+                            )
+                        }
+                ) {
+                    Image(
+                        bitmap = bitmap.asImageBitmap(),
+                        contentDescription = "Collage Image",
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer(
+                                scaleX = if (flipH) -scale else scale,
+                                scaleY = if (flipV) -scale else scale,
+                                translationX = offset.x,
+                                translationY = offset.y,
+                                rotationZ = rotation
+                            ),
+                        contentScale = ContentScale.Fit
+                    )
+
+                    Row(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(8.dp)
+                            .background(Color.Black.copy(alpha = 0.65f), RoundedCornerShape(16.dp))
+                            .padding(horizontal = 8.dp, vertical = 2.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(
+                            onClick = {
+                                onPickImageClick()
+                            },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(Icons.Default.AddPhotoAlternate, contentDescription = "Replace Image", tint = Color.White, modifier = Modifier.size(18.dp))
+                        }
+
+                        IconButton(
+                            onClick = {
+                                val nextRot = (rotation + 90f) % 360f
+                                onUpdateProperties(nextRot, flipH, flipV, scale, offset.x, offset.y)
+                            },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(Icons.Default.RotateRight, contentDescription = "Rotate 90", tint = Color.White, modifier = Modifier.size(18.dp))
+                        }
+
+                        IconButton(
+                            onClick = {
+                                onUpdateProperties(rotation, !flipH, flipV, scale, offset.x, offset.y)
+                            },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(Icons.Default.Flip, contentDescription = "Flip Horizontal", tint = Color.White, modifier = Modifier.size(18.dp))
+                        }
+
+                        IconButton(
+                            onClick = {
+                                onUpdateProperties(rotation, flipH, !flipV, scale, offset.x, offset.y)
+                            },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(Icons.Default.SwapVert, contentDescription = "Flip Vertical", tint = Color.White, modifier = Modifier.size(18.dp))
+                        }
+
+                        IconButton(
+                            onClick = {
+                                onDeleteClick()
+                            },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.Red, modifier = Modifier.size(18.dp))
+                        }
+                    }
+                }
+            } else {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("Error loading image", color = Color.Red, fontSize = 12.sp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun CollageEditorView(
+    activePage: com.example.data.PageDef,
+    isCollagePickingTop: Boolean,
+    onChangePickingTop: (Boolean) -> Unit,
+    collagePickerLauncher: androidx.activity.result.ActivityResultLauncher<String>,
+    viewModel: MainViewModel
+) {
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val pageW = maxWidth
+        val pageH = maxHeight
+        
+        val rectW = pageW * 0.9f
+        val rectH = pageH * 0.45f
+        
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Top Half
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                // Outer printable border/guide
+                Box(
+                    modifier = Modifier
+                        .size(rectW, rectH)
+                        .border(1.dp, Color.Gray.copy(alpha = 0.4f), RoundedCornerShape(2.dp))
+                        .background(Color(0xFFFAFAFA))
+                ) {
+                    CollagePortionView(
+                        isTop = true,
+                        item = activePage.collageTop,
+                        filterType = activePage.filterType,
+                        viewModel = viewModel,
+                        onPickImageClick = {
+                            onChangePickingTop(true)
+                            collagePickerLauncher.launch("image/*")
+                        },
+                        onUpdateProperties = { rot, flipH, flipV, scale, offX, offY ->
+                            val updated = activePage.collageTop?.copy(
+                                rotation = rot,
+                                flipHorizontal = flipH,
+                                flipVertical = flipV,
+                                scale = scale,
+                                offsetX = offX,
+                                offsetY = offY
+                            )
+                            viewModel.updateCollageItem(isTop = true, item = updated)
+                        },
+                        onDeleteClick = {
+                            viewModel.updateCollageItem(isTop = true, item = null)
+                        }
+                    )
+                }
+            }
+            
+            // Middle dividing line
+            Spacer(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(Color.LightGray.copy(alpha = 0.5f))
+            )
+            
+            // Bottom Half
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                // Outer printable border/guide
+                Box(
+                    modifier = Modifier
+                        .size(rectW, rectH)
+                        .border(1.dp, Color.Gray.copy(alpha = 0.4f), RoundedCornerShape(2.dp))
+                        .background(Color(0xFFFAFAFA))
+                ) {
+                    CollagePortionView(
+                        isTop = false,
+                        item = activePage.collageBottom,
+                        filterType = activePage.filterType,
+                        viewModel = viewModel,
+                        onPickImageClick = {
+                            onChangePickingTop(false)
+                            collagePickerLauncher.launch("image/*")
+                        },
+                        onUpdateProperties = { rot, flipH, flipV, scale, offX, offY ->
+                            val updated = activePage.collageBottom?.copy(
+                                rotation = rot,
+                                flipHorizontal = flipH,
+                                flipVertical = flipV,
+                                scale = scale,
+                                offsetX = offX,
+                                offsetY = offY
+                            )
+                            viewModel.updateCollageItem(isTop = false, item = updated)
+                        },
+                        onDeleteClick = {
+                            viewModel.updateCollageItem(isTop = false, item = null)
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
 

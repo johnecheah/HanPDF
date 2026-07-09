@@ -52,17 +52,29 @@ data class SignatureOverlayDef(
     val colorHex: String = "#000000"
 )
 
+data class CollageItemDef(
+    val imagePath: String,
+    val rotation: Float = 0f,
+    val flipHorizontal: Boolean = false,
+    val flipVertical: Boolean = false,
+    val scale: Float = 1f,
+    val offsetX: Float = 0f,
+    val offsetY: Float = 0f
+)
+
 data class PageDef(
     val id: String,
     val pageNumber: Int,
-    val type: String = "blank", // "blank", "lined", "cornell", "meeting", "scan", "id_card"
+    val type: String = "blank", // "blank", "lined", "cornell", "meeting", "scan", "id_card", "collage"
     val backgroundScanPath: String? = null, // Set if page is scanned from camera
     val drawings: List<DrawingDef> = emptyList(),
     val textAnnotations: List<TextAnnotationDef> = emptyList(),
     val signatures: List<SignatureOverlayDef> = emptyList(),
     val ocrText: String? = null, // Extracted text content for OCR page index
     val rotationDegrees: Int = 0,
-    val filterType: String = "original"
+    val filterType: String = "original",
+    val collageTop: CollageItemDef? = null,
+    val collageBottom: CollageItemDef? = null
 )
 
 data class DocumentContent(

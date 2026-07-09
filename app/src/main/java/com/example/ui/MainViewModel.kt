@@ -294,6 +294,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     "blank" -> "Blank Note"
                     "lined" -> "Lined Note"
                     "cornell" -> "Cornell Note"
+                    "collage" -> "Collage Image"
                     else -> "Blank Doc"
                 },
                 pageCount = 1,
@@ -917,6 +918,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun updateCollageItem(isTop: Boolean, item: com.example.data.CollageItemDef?) {
+        pushToUndoStack()
+        val currentContent = _uiState.value.activeDocumentContent
+        val activePageId = _uiState.value.activePageId
+        
+        val updatedPages = currentContent.pages.map { page ->
+            if (page.id == activePageId) {
+                if (isTop) {
+                    page.copy(collageTop = item)
+                } else {
+                    page.copy(collageBottom = item)
+                }
+            } else {
+                page
+            }
+        }
+        
+        _uiState.update {
+            it.copy(activeDocumentContent = currentContent.copy(pages = updatedPages))
+        }
+    }
+
     fun editActivePageRotation(rotationDegrees: Int) {
         pushToUndoStack()
         val currentContent = _uiState.value.activeDocumentContent
@@ -988,15 +1011,53 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun addNewPageToEditor() {
+    fun addNewPageToEditor(type: String = "blank") {
+        pushToUndoStack()
+        val currentContent = _uiState.value.activeDocumentContent
+        val sizePage = currentContent.pages.size
+        
+        val defaultAnns = if (type == "word") {
+            listOf(
+                com.example.data.TextAnnotationDef(
+                    id = "word_main_content",
+                    text = "",
+                    x = 0.08f,
+                    y = 0.08f,
+                    fontSize = 12f,
+                    colorHex = "#1E293B",
+                    isBold = false,
+                    alignment = "left"
+                )
+            )
+        } else {
+            emptyList()
+        }
+
+        val newPage = PageDef(
+            id = java.util.UUID.randomUUID().toString(),
+            pageNumber = sizePage + 1,
+            type = type,
+            textAnnotations = defaultAnns
+        )
+        
+        val newContent = currentContent.copy(pages = currentContent.pages + newPage)
+        _uiState.update {
+            it.copy(
+                activeDocumentContent = newContent,
+                activePageId = newPage.id
+            )
+        }
+    }
+
+    fun addCollagePageToEditor() {
         pushToUndoStack()
         val currentContent = _uiState.value.activeDocumentContent
         val sizePage = currentContent.pages.size
         
         val newPage = PageDef(
-            id = UUID.randomUUID().toString(),
+            id = java.util.UUID.randomUUID().toString(),
             pageNumber = sizePage + 1,
-            type = "blank"
+            type = "collage"
         )
         
         val newContent = currentContent.copy(pages = currentContent.pages + newPage)

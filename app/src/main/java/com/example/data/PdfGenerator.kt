@@ -162,6 +162,9 @@ object PdfGenerator {
                         "meeting" -> {
                             drawMeetingMinutesTemplate(canvas, curW, curH)
                         }
+                        "collage" -> {
+                            drawCollageTemplate(canvas, curW, curH, pageDef)
+                        }
                     }
                 }
 
@@ -432,5 +435,91 @@ object PdfGenerator {
             }
             canvas.drawPath(offsetPath, offsetPaint)
         }
+    }
+
+    private fun drawCollageTemplate(canvas: Canvas, w: Int, h: Int, pageDef: PageDef) {
+        val halfH = h / 2f
+        
+        // Draw dividing line
+        val linePaint = Paint().apply {
+            color = Color.parseColor("#CCCCCC")
+            strokeWidth = 2f
+            style = Paint.Style.STROKE
+        }
+        canvas.drawLine(0f, halfH, w.toFloat(), halfH, linePaint)
+        
+        // Render top and bottom collage images if available
+        pageDef.collageTop?.let { item ->
+            drawCollageItem(canvas, item, isTop = true, curW = w, curH = h, filterType = pageDef.filterType)
+        }
+        pageDef.collageBottom?.let { item ->
+            drawCollageItem(canvas, item, isTop = false, curW = w, curH = h, filterType = pageDef.filterType)
+        }
+    }
+
+    private fun drawCollageItem(canvas: Canvas, item: CollageItemDef, isTop: Boolean, curW: Int, curH: Int, filterType: String) {
+        val bmp = try {
+            val originalBmp = BitmapFactory.decodeFile(item.imagePath)
+            if (originalBmp != null && filterType != "original") {
+                val filtered = BitmapFilter.applyFilter(originalBmp, filterType)
+                if (filtered != originalBmp) {
+                    originalBmp.recycle()
+                }
+                filtered
+            } else {
+                originalBmp
+            }
+        } catch (e: Exception) {
+            null
+        } ?: return
+        
+        canvas.save()
+        
+        val rectW = curW * 0.9f
+        val rectH = curH * 0.45f
+        
+        val centerX = curW / 2f
+        val halfH = curH / 2f
+        val centerY = if (isTop) halfH / 2f else halfH + (halfH / 2f)
+        
+        val left = centerX - rectW / 2f
+        val top = centerY - rectH / 2f
+        val right = centerX + rectW / 2f
+        val bottom = centerY + rectH / 2f
+        
+        canvas.clipRect(left, top, right, bottom)
+        
+        val imgW = bmp.width.toFloat()
+        val imgH = bmp.height.toFloat()
+        
+        // Center-fit/fill the image inside the 19.8cm x 11.8cm bounding box
+        val scaleToFit = minOf(rectW / imgW, rectH / imgH)
+        
+        val matrix = android.graphics.Matrix()
+        // 1. Move origin to center of bitmap
+        matrix.postTranslate(-imgW / 2f, -imgH / 2f)
+        
+        // 2. Apply flip
+        val flipX = if (item.flipHorizontal) -1f else 1f
+        val flipY = if (item.flipVertical) -1f else 1f
+        matrix.postScale(flipX, flipY)
+        
+        // 3. Apply rotation
+        matrix.postRotate(item.rotation)
+        
+        // 4. Apply scale (scaleToFit * zoom/scale)
+        val totalScale = scaleToFit * item.scale
+        matrix.postScale(totalScale, totalScale)
+        
+        // 5. Apply translation to the center of portion, plus normalized user offset panning
+        val scaleFactor = curW.toFloat() / 400f
+        val panX = item.offsetX * scaleFactor
+        val panY = item.offsetY * scaleFactor
+        matrix.postTranslate(centerX + panX, centerY + panY)
+        
+        canvas.drawBitmap(bmp, matrix, Paint(Paint.FILTER_BITMAP_FLAG))
+        
+        canvas.restore()
+        bmp.recycle()
     }
 }
