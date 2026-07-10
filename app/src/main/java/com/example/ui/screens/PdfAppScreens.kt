@@ -995,7 +995,7 @@ fun DashboardScreen(
                         Spacer(modifier = Modifier.height(18.dp))
                         
                         Text(
-                            text = "Created by\nJohne Cheah\n@2026\n \nVersion V2.0",
+                            text = "Created by\nJohne Cheah\n@2026\n \nVersion V2.1",
                             fontSize = 15.sp,
                             lineHeight = 22.sp,
                             fontWeight = FontWeight.Bold,
@@ -7018,7 +7018,6 @@ fun ScanEditScreen(
                     .weight(1f)
                     .padding(16.dp)
                     .background(Color(0xFF0F172A), RoundedCornerShape(8.dp))
-                    .border(BorderStroke(1.dp, Color.DarkGray), RoundedCornerShape(8.dp))
                     .clip(RoundedCornerShape(8.dp))
                     .let { baseModifier ->
                         if (activePage.type.lowercase() == "collage") {
@@ -7128,7 +7127,6 @@ fun ScanEditScreen(
                             rotationZ = pageRotationDegrees.toFloat()
                         )
                         .background(Color.White)
-                        .shadow(4.dp, RoundedCornerShape(2.dp))
                 ) {
                     BoxWithConstraints(
                         modifier = Modifier
