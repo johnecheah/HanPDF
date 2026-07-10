@@ -72,6 +72,10 @@ class ResizableDraggableSignatureView @JvmOverloads constructor(
     var onSelected: (() -> Unit)? = null
     var onDeleteRequested: (() -> Unit)? = null
 
+    var onDragStarted: (() -> Unit)? = null
+    var onDragging: ((view: View, tx: Float, ty: Float, width: Float, height: Float, rotation: Float) -> Unit)? = null
+    var onDragEnded: (() -> Unit)? = null
+
     var isSelectedState: Boolean = false
         set(value) {
             field = value
@@ -156,6 +160,7 @@ class ResizableDraggableSignatureView @JvmOverloads constructor(
                 } else {
                     isDragging = true
                     isResizing = false
+                    onDragStarted?.invoke()
                 }
                 parent?.requestDisallowInterceptTouchEvent(true)
                 return true
@@ -180,6 +185,7 @@ class ResizableDraggableSignatureView @JvmOverloads constructor(
                 } else if (isDragging) {
                     translationX += dx
                     translationY += dy
+                    onDragging?.invoke(this, translationX, translationY, width.toFloat(), height.toFloat(), 0f)
                 }
 
                 lastX = rawX
@@ -188,10 +194,14 @@ class ResizableDraggableSignatureView @JvmOverloads constructor(
             }
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                val wasDragging = isDragging
                 isDragging = false
                 isResizing = false
                 parent?.requestDisallowInterceptTouchEvent(false)
                 onSignatureChanged?.invoke(translationX, translationY, width.toFloat(), height.toFloat())
+                if (wasDragging) {
+                    onDragEnded?.invoke()
+                }
             }
         }
         return true

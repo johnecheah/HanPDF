@@ -438,16 +438,6 @@ object PdfGenerator {
     }
 
     private fun drawCollageTemplate(canvas: Canvas, w: Int, h: Int, pageDef: PageDef) {
-        val halfH = h / 2f
-        
-        // Draw dividing line
-        val linePaint = Paint().apply {
-            color = Color.parseColor("#CCCCCC")
-            strokeWidth = 2f
-            style = Paint.Style.STROKE
-        }
-        canvas.drawLine(0f, halfH, w.toFloat(), halfH, linePaint)
-        
         // Render top and bottom collage images if available
         pageDef.collageTop?.let { item ->
             drawCollageItem(canvas, item, isTop = true, curW = w, curH = h, filterType = pageDef.filterType)
@@ -475,8 +465,8 @@ object PdfGenerator {
         
         canvas.save()
         
-        val rectW = curW * 0.9f
-        val rectH = curH * 0.45f
+        val rectW = curW * 0.95f
+        val rectH = curH * 0.475f
         
         val centerX = curW / 2f
         val halfH = curH / 2f

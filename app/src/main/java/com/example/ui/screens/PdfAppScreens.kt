@@ -69,6 +69,7 @@ import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
@@ -102,13 +103,21 @@ import kotlinx.coroutines.launch
 import java.io.File
 import kotlin.math.roundToInt
 
-fun getFontFamily(fontName: String?): FontFamily {
+fun getFontFamily(fontName: String?, isBold: Boolean = false, isItalic: Boolean = false): FontFamily {
+    val style = when {
+        isBold && isItalic -> android.graphics.Typeface.BOLD_ITALIC
+        isBold -> android.graphics.Typeface.BOLD
+        isItalic -> android.graphics.Typeface.ITALIC
+        else -> android.graphics.Typeface.NORMAL
+    }
     return when (fontName?.lowercase()) {
-        "times new roman", "serif" -> FontFamily.Serif
-        "monospace" -> FontFamily.Monospace
-        "cursive" -> FontFamily.Cursive
-        "tahoma", "calibri", "arial" -> FontFamily.SansSerif
-        else -> FontFamily.Default
+        "times new roman", "serif", "times nr", "time nr" -> FontFamily(android.graphics.Typeface.create(android.graphics.Typeface.SERIF, style))
+        "tahoma" -> FontFamily(android.graphics.Typeface.create("sans-serif-condensed", style))
+        "calibri" -> FontFamily(android.graphics.Typeface.create("sans-serif-light", style))
+        "arial" -> FontFamily(android.graphics.Typeface.create("sans-serif", style))
+        "monospace" -> FontFamily(android.graphics.Typeface.create(android.graphics.Typeface.MONOSPACE, style))
+        "cursive" -> FontFamily(android.graphics.Typeface.create("serif", style))
+        else -> FontFamily(android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, style))
     }
 }
 
@@ -886,7 +895,7 @@ fun DashboardScreen(
                         Spacer(modifier = Modifier.height(18.dp))
                         
                         Text(
-                            text = "Created by\nJohne Cheah\n@2026\n \nVersion V1.3",
+                            text = "Created by\nJohne Cheah\n@2026\n \nVersion V2.0",
                             fontSize = 15.sp,
                             lineHeight = 22.sp,
                             fontWeight = FontWeight.Bold,
@@ -4807,6 +4816,14 @@ fun ScanEditScreen(
     var showEditWordDialog by remember { mutableStateOf(false) }
     var selectedWordToEdit by remember { mutableStateOf<TextAnnotationDef?>(null) }
     var selectedAnnotationId by remember { mutableStateOf<String?>(null) }
+    var isTextOutlineVisible by remember { mutableStateOf(true) }
+
+    LaunchedEffect(selectedAnnotationId) {
+        if (selectedAnnotationId != null) {
+            isTextOutlineVisible = true
+        }
+    }
+
     var editWordTextDraft by remember { mutableStateOf("") }
 
     var showAddWordColorPicker by remember { mutableStateOf(false) }
@@ -4900,6 +4917,220 @@ fun ScanEditScreen(
     var pagePositionOnScreenY by remember(activePage.id) { mutableStateOf(0f) }
     var pageRotationDegrees by remember(activePage.id) { mutableStateOf(activePage.rotationDegrees) }
     var isHorizontalOverride by remember(activePage.id) { mutableStateOf<Boolean?>(null) }
+    var smartGuideActiveDrag by remember { mutableStateOf<SmartGuideDragInfo?>(null) }
+
+    val onDraggingItem: (view: android.view.View, id: String, isText: Boolean, tx: Float, ty: Float, w: Float, h: Float, rotation: Float) -> Unit = { view, dragId, isText, tx, ty, w, h, r ->
+        // 1. Gather all alignment targets on this page (excluding dragId)
+        val targets = mutableListOf<SmartGuideTarget>()
+        
+        // Add the page/canvas itself as an alignment target
+        targets.add(
+            SmartGuideTarget(
+                id = "canvas",
+                name = "Canvas",
+                left = 0f,
+                top = 0f,
+                right = pageMeasuredWidthPx,
+                bottom = pageMeasuredHeightPx
+            )
+        )
+        
+        // Add other text annotations
+        val textAnnsToRender = if (activePage.type.lowercase() == "word") {
+            currentTextAnns.filter { it.id != "word_main_content" }
+        } else {
+            currentTextAnns
+        }
+        textAnnsToRender.forEach { txtAnn ->
+            if (txtAnn.id != dragId) {
+                val bounds = TextAnnotationRenderer.computeBounds(txtAnn, 0f, 0f, pageMeasuredWidthPx, txtAnn.id == "word_main_content")
+                val targetL = txtAnn.x * pageMeasuredWidthPx + bounds.left
+                val targetT = txtAnn.y * pageMeasuredHeightPx + bounds.top
+                val targetW = bounds.width()
+                val targetH = bounds.height()
+                targets.add(
+                    SmartGuideTarget(
+                        id = txtAnn.id,
+                        name = "Text",
+                        left = targetL,
+                        top = targetT,
+                        right = targetL + targetW,
+                        bottom = targetT + targetH
+                    )
+                )
+            }
+        }
+        
+        // Add other signatures
+        currentSignatures.forEach { sig ->
+            if (sig.id != dragId) {
+                val scaleFactor = (pageMeasuredWidthPx / 400f).coerceAtLeast(0.1f)
+                val targetL = sig.x * pageMeasuredWidthPx
+                val targetT = sig.y * pageMeasuredHeightPx
+                val targetW = sig.width * scaleFactor
+                val targetH = sig.height * scaleFactor
+                targets.add(
+                    SmartGuideTarget(
+                        id = sig.id,
+                        name = "Signature",
+                        left = targetL,
+                        top = targetT,
+                        right = targetL + targetW,
+                        bottom = targetT + targetH
+                    )
+                )
+            }
+        }
+        
+        // 2. Perform Snapping / Alignment calculation
+        val SNAP_THRESHOLD = 10f // px
+        var snappedTx = tx
+        var snappedTy = ty
+        
+        val matchedVLines = mutableListOf<Float>()
+        val matchedHLines = mutableListOf<Float>()
+        val matchedTargets = mutableListOf<SmartGuideTarget>()
+        var isSnapX = false
+        var isSnapY = false
+        
+        // Check X-axis alignments
+        var minDiffX = SNAP_THRESHOLD
+        var bestSnapX: Float? = null
+        var bestVLineCoord: Float? = null
+        var bestTargetX: SmartGuideTarget? = null
+        
+        val dL = tx
+        val dR = tx + w
+        val dCX = tx + w / 2f
+        
+        for (target in targets) {
+            // Align left to target left
+            var diff = dL - target.left
+            if (Math.abs(diff) < Math.abs(minDiffX)) {
+                minDiffX = diff
+                bestSnapX = target.left
+                bestVLineCoord = target.left
+                bestTargetX = target
+            }
+            // Align left to target right
+            diff = dL - target.right
+            if (Math.abs(diff) < Math.abs(minDiffX)) {
+                minDiffX = diff
+                bestSnapX = target.right
+                bestVLineCoord = target.right
+                bestTargetX = target
+            }
+            // Align right to target left
+            diff = dR - target.left
+            if (Math.abs(diff) < Math.abs(minDiffX)) {
+                minDiffX = diff
+                bestSnapX = target.left - w
+                bestVLineCoord = target.left
+                bestTargetX = target
+            }
+            // Align right to target right
+            diff = dR - target.right
+            if (Math.abs(diff) < Math.abs(minDiffX)) {
+                minDiffX = diff
+                bestSnapX = target.right - w
+                bestVLineCoord = target.right
+                bestTargetX = target
+            }
+            // Align center to target center
+            diff = dCX - target.centerX
+            if (Math.abs(diff) < Math.abs(minDiffX)) {
+                minDiffX = diff
+                bestSnapX = target.centerX - w / 2f
+                bestVLineCoord = target.centerX
+                bestTargetX = target
+            }
+        }
+        
+        if (bestSnapX != null) {
+            snappedTx = bestSnapX
+            bestVLineCoord?.let { matchedVLines.add(it) }
+            bestTargetX?.let { matchedTargets.add(it) }
+            isSnapX = true
+            view.translationX = snappedTx
+        }
+        
+        // Check Y-axis alignments
+        var minDiffY = SNAP_THRESHOLD
+        var bestSnapY: Float? = null
+        var bestHLineCoord: Float? = null
+        var bestTargetY: SmartGuideTarget? = null
+        
+        val dT = ty
+        val dB = ty + h
+        val dCY = ty + h / 2f
+        
+        for (target in targets) {
+            // Align top to target top
+            var diff = dT - target.top
+            if (Math.abs(diff) < Math.abs(minDiffY)) {
+                minDiffY = diff
+                bestSnapY = target.top
+                bestHLineCoord = target.top
+                bestTargetY = target
+            }
+            // Align top to target bottom
+            diff = dT - target.bottom
+            if (Math.abs(diff) < Math.abs(minDiffY)) {
+                minDiffY = diff
+                bestSnapY = target.bottom
+                bestHLineCoord = target.bottom
+                bestTargetY = target
+            }
+            // Align bottom to target top
+            diff = dB - target.top
+            if (Math.abs(diff) < Math.abs(minDiffY)) {
+                minDiffY = diff
+                bestSnapY = target.top - h
+                bestHLineCoord = target.top
+                bestTargetY = target
+            }
+            // Align bottom to target bottom
+            diff = dB - target.bottom
+            if (Math.abs(diff) < Math.abs(minDiffY)) {
+                minDiffY = diff
+                bestSnapY = target.bottom - h
+                bestHLineCoord = target.bottom
+                bestTargetY = target
+            }
+            // Align center to target center
+            diff = dCY - target.centerY
+            if (Math.abs(diff) < Math.abs(minDiffY)) {
+                minDiffY = diff
+                bestSnapY = target.centerY - h / 2f
+                bestHLineCoord = target.centerY
+                bestTargetY = target
+            }
+        }
+        
+        if (bestSnapY != null) {
+            snappedTy = bestSnapY
+            bestHLineCoord?.let { matchedHLines.add(it) }
+            bestTargetY?.let { matchedTargets.add(it) }
+            isSnapY = true
+            view.translationY = snappedTy
+        }
+        
+        // 3. Update smartGuideActiveDrag state
+        smartGuideActiveDrag = SmartGuideDragInfo(
+            id = dragId,
+            isText = isText,
+            translationX = snappedTx,
+            translationY = snappedTy,
+            width = w,
+            height = h,
+            rotation = r,
+            matchedVLines = matchedVLines,
+            matchedHLines = matchedHLines,
+            matchedTargets = matchedTargets,
+            isSnapX = isSnapX,
+            isSnapY = isSnapY
+        )
+    }
 
     val isModified = remember(state.activeDocumentContent, activeDoc.contentJson) {
         val currentJson = DocumentSerializer.toJson(state.activeDocumentContent)
@@ -5549,6 +5780,7 @@ fun ScanEditScreen(
                                 }
 
                                   Row(
+                                       modifier = Modifier.horizontalScroll(rememberScrollState()),
                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
                                        verticalAlignment = Alignment.CenterVertically
                                   ) {
@@ -5666,6 +5898,41 @@ fun ScanEditScreen(
                                           }
                                       }
 
+                                      // 3.5 SHOW/HIDE OUTLINE TOGGLE
+                                      Box(
+                                          modifier = Modifier
+                                              .size(38.dp)
+                                              .let {
+                                                  if (selectedAnn != null) {
+                                                      it.clickable {
+                                                          isTextOutlineVisible = !isTextOutlineVisible
+                                                      }
+                                                  } else it
+                                              },
+                                          contentAlignment = Alignment.Center
+                                      ) {
+                                          Box(
+                                              modifier = Modifier
+                                                  .size(24.dp)
+                                                  .background(
+                                                      if (selectedAnn != null) {
+                                                          if (isTextOutlineVisible) Color(0xFFE0F2FE) else Color(0xFFF1F5F9)
+                                                      } else Color(0xFF94A3B8),
+                                                      CircleShape
+                                                  ),
+                                              contentAlignment = Alignment.Center
+                                          ) {
+                                              Icon(
+                                                  imageVector = if (isTextOutlineVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                                  contentDescription = "Toggle Selection Outline",
+                                                  tint = if (selectedAnn != null) {
+                                                      if (isTextOutlineVisible) Color(0xFF0369A1) else Color(0xFF475569)
+                                                  } else Color.White,
+                                                  modifier = Modifier.size(13.dp)
+                                              )
+                                          }
+                                      }
+
                                       // 4. DECREASE SIZE
                                       Box(
                                           modifier = Modifier
@@ -5673,8 +5940,9 @@ fun ScanEditScreen(
                                               .let {
                                                   if (selectedAnn != null) {
                                                       it.clickable {
+                                                          isTextOutlineVisible = false
                                                           selectedAnn.let { ann ->
-                                                              val newSize = (ann.fontSize - 1f).coerceAtLeast(6f)
+                                                              val newSize = (ann.fontSize - 1f).coerceAtLeast(1f)
                                                               val updated = ann.copy(fontSize = newSize)
                                                               val idx = currentTextAnns.indexOfFirst { it.id == ann.id }
                                                               if (idx != -1) {
@@ -5712,6 +5980,7 @@ fun ScanEditScreen(
                                               .let {
                                                   if (selectedAnn != null) {
                                                       it.clickable {
+                                                          isTextOutlineVisible = false
                                                           selectedAnn.let { ann ->
                                                               val newSize = (ann.fontSize + 1f).coerceAtMost(100f)
                                                               val updated = ann.copy(fontSize = newSize)
@@ -5751,6 +6020,7 @@ fun ScanEditScreen(
                                               .let {
                                                   if (selectedAnn != null) {
                                                       it.clickable {
+                                                          isTextOutlineVisible = false
                                                           selectedAnn.let { ann ->
                                                               val newRotation = (ann.rotation + 15f) % 360f
                                                               val updated = ann.copy(rotation = newRotation)
@@ -5782,6 +6052,166 @@ fun ScanEditScreen(
                                               )
                                           }
                                       }
+
+                                      // 7. MOVE UP
+                                      Box(
+                                          modifier = Modifier
+                                              .size(38.dp)
+                                              .let {
+                                                  if (selectedAnn != null) {
+                                                      it.clickable {
+                                                          isTextOutlineVisible = false
+                                                          selectedAnn.let { ann ->
+                                                              val newY = (ann.y - 0.002f).coerceIn(0f, 0.99f)
+                                                              val updated = ann.copy(y = newY)
+                                                              val idx = currentTextAnns.indexOfFirst { it.id == ann.id }
+                                                              if (idx != -1) {
+                                                                  currentTextAnns[idx] = updated
+                                                                  viewModel.editActivePageAnnotations(currentTextAnns.toList())
+                                                              }
+                                                          }
+                                                      }
+                                                  } else it
+                                              },
+                                          contentAlignment = Alignment.Center
+                                      ) {
+                                          Box(
+                                              modifier = Modifier
+                                                  .size(24.dp)
+                                                  .background(
+                                                      if (selectedAnn != null) Color(0xFFDBEAFE) else Color(0xFF94A3B8),
+                                                      CircleShape
+                                                  ),
+                                              contentAlignment = Alignment.Center
+                                          ) {
+                                              Icon(
+                                                  imageVector = Icons.Default.ArrowUpward,
+                                                  contentDescription = "Move Up",
+                                                  tint = if (selectedAnn != null) Color(0xFF2563EB) else Color.White,
+                                                  modifier = Modifier.size(13.dp)
+                                              )
+                                          }
+                                      }
+
+                                      // 8. MOVE DOWN
+                                      Box(
+                                          modifier = Modifier
+                                              .size(38.dp)
+                                              .let {
+                                                  if (selectedAnn != null) {
+                                                      it.clickable {
+                                                          isTextOutlineVisible = false
+                                                          selectedAnn.let { ann ->
+                                                              val newY = (ann.y + 0.002f).coerceIn(0f, 0.99f)
+                                                              val updated = ann.copy(y = newY)
+                                                              val idx = currentTextAnns.indexOfFirst { it.id == ann.id }
+                                                              if (idx != -1) {
+                                                                  currentTextAnns[idx] = updated
+                                                                  viewModel.editActivePageAnnotations(currentTextAnns.toList())
+                                                              }
+                                                          }
+                                                      }
+                                                  } else it
+                                              },
+                                          contentAlignment = Alignment.Center
+                                      ) {
+                                          Box(
+                                              modifier = Modifier
+                                                  .size(24.dp)
+                                                  .background(
+                                                      if (selectedAnn != null) Color(0xFFDBEAFE) else Color(0xFF94A3B8),
+                                                      CircleShape
+                                                  ),
+                                              contentAlignment = Alignment.Center
+                                          ) {
+                                              Icon(
+                                                  imageVector = Icons.Default.ArrowDownward,
+                                                  contentDescription = "Move Down",
+                                                  tint = if (selectedAnn != null) Color(0xFF2563EB) else Color.White,
+                                                  modifier = Modifier.size(13.dp)
+                                              )
+                                          }
+                                      }
+
+                                      // 9. MOVE LEFT
+                                      Box(
+                                          modifier = Modifier
+                                              .size(38.dp)
+                                              .let {
+                                                  if (selectedAnn != null) {
+                                                      it.clickable {
+                                                          isTextOutlineVisible = false
+                                                          selectedAnn.let { ann ->
+                                                              val newX = (ann.x - 0.002f).coerceIn(0f, 0.99f)
+                                                              val updated = ann.copy(x = newX)
+                                                              val idx = currentTextAnns.indexOfFirst { it.id == ann.id }
+                                                              if (idx != -1) {
+                                                                  currentTextAnns[idx] = updated
+                                                                  viewModel.editActivePageAnnotations(currentTextAnns.toList())
+                                                              }
+                                                          }
+                                                      }
+                                                  } else it
+                                              },
+                                          contentAlignment = Alignment.Center
+                                      ) {
+                                          Box(
+                                              modifier = Modifier
+                                                  .size(24.dp)
+                                                  .background(
+                                                      if (selectedAnn != null) Color(0xFFDBEAFE) else Color(0xFF94A3B8),
+                                                      CircleShape
+                                                  ),
+                                              contentAlignment = Alignment.Center
+                                          ) {
+                                              Icon(
+                                                  imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                                  contentDescription = "Move Left",
+                                                  tint = if (selectedAnn != null) Color(0xFF2563EB) else Color.White,
+                                                  modifier = Modifier.size(13.dp)
+                                              )
+                                          }
+                                      }
+
+                                      // 10. MOVE RIGHT
+                                      Box(
+                                          modifier = Modifier
+                                              .size(38.dp)
+                                              .let {
+                                                  if (selectedAnn != null) {
+                                                      it.clickable {
+                                                          isTextOutlineVisible = false
+                                                          selectedAnn.let { ann ->
+                                                              val newX = (ann.x + 0.002f).coerceIn(0f, 0.99f)
+                                                              val updated = ann.copy(x = newX)
+                                                              val idx = currentTextAnns.indexOfFirst { it.id == ann.id }
+                                                              if (idx != -1) {
+                                                                  currentTextAnns[idx] = updated
+                                                                  viewModel.editActivePageAnnotations(currentTextAnns.toList())
+                                                              }
+                                                          }
+                                                      }
+                                                  } else it
+                                              },
+                                          contentAlignment = Alignment.Center
+                                      ) {
+                                          Box(
+                                              modifier = Modifier
+                                                  .size(24.dp)
+                                                  .background(
+                                                      if (selectedAnn != null) Color(0xFFDBEAFE) else Color(0xFF94A3B8),
+                                                      CircleShape
+                                                  ),
+                                              contentAlignment = Alignment.Center
+                                          ) {
+                                              Icon(
+                                                  imageVector = Icons.Default.ArrowForward,
+                                                  contentDescription = "Move Right",
+                                                  tint = if (selectedAnn != null) Color(0xFF2563EB) else Color.White,
+                                                  modifier = Modifier.size(13.dp)
+                                              )
+                                          }
+                                      }
                                  }
                             }
                         }
@@ -5800,8 +6230,32 @@ fun ScanEditScreen(
                                     
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        horizontalArrangement = Arrangement.spacedBy(16.dp)
                                     ) {
+                                        // 0. Delete selected signature
+                                        Box(
+                                            modifier = Modifier
+                                                .size(28.dp)
+                                                .background(
+                                                    if (selectedSig != null) Color(0xFFFEE2E2) else Color(0xFF94A3B8).copy(alpha = 0.3f),
+                                                    CircleShape
+                                                )
+                                                .clickable(enabled = selectedSig != null) {
+                                                    selectedSig?.let { sig ->
+                                                        viewModel.removeSignatureOverlay(sig.id)
+                                                        selectedAnnotationId = null
+                                                    }
+                                                },
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Delete,
+                                                contentDescription = "Delete Selected Signature",
+                                                tint = if (selectedSig != null) Color(0xFFEF4444) else Color.White,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                        }
+
                                         // 1. Decrease signature size
                                         Box(
                                             modifier = Modifier
@@ -7120,8 +7574,29 @@ fun ScanEditScreen(
                                 view.refHeightPx = pageMeasuredHeightPx
                             }
                             view.isSelectedState = isSelected
+                            view.isOutlineVisible = isTextOutlineVisible
 
                             view.onSelected = { selectedAnnotationId = txtAnn.id }
+
+                            view.onDragStarted = {
+                                smartGuideActiveDrag = SmartGuideDragInfo(
+                                    id = txtAnn.id,
+                                    isText = true,
+                                    translationX = view.translationX,
+                                    translationY = view.translationY,
+                                    width = view.width.toFloat(),
+                                    height = view.height.toFloat(),
+                                    rotation = view.rotation
+                                )
+                            }
+
+                            view.onDragging = { v, tx, ty, w, h, r ->
+                                onDraggingItem(v, txtAnn.id, true, tx, ty, w, h, r)
+                            }
+
+                            view.onDragEnded = {
+                                smartGuideActiveDrag = null
+                            }
 
                             view.onDeleteRequested = {
                                 val idxLocal = currentTextAnns.indexOfFirst { it.id == txtAnn.id }
@@ -7199,6 +7674,26 @@ fun ScanEditScreen(
                                 selectedAnnotationId = sigOverlay.id
                             }
 
+                            view.onDragStarted = {
+                                smartGuideActiveDrag = SmartGuideDragInfo(
+                                    id = sigOverlay.id,
+                                    isText = false,
+                                    translationX = view.translationX,
+                                    translationY = view.translationY,
+                                    width = viewWidthPx.toFloat(),
+                                    height = viewHeightPx.toFloat(),
+                                    rotation = 0f
+                                )
+                            }
+
+                            view.onDragging = { v, tx, ty, w, h, r ->
+                                onDraggingItem(v, sigOverlay.id, false, tx, ty, w, h, r)
+                            }
+
+                            view.onDragEnded = {
+                                smartGuideActiveDrag = null
+                            }
+
                             view.onDeleteRequested = {
                                 viewModel.removeSignatureOverlay(sigOverlay.id)
                                 selectedAnnotationId = null
@@ -7224,6 +7719,179 @@ fun ScanEditScreen(
                         }
                     }
                 )
+
+                // --- SMART GUIDES COMPOSE CANVAS OVERLAY ---
+                val dragInfo = smartGuideActiveDrag
+                if (dragInfo != null) {
+                    androidx.compose.foundation.Canvas(
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        val density = this.density
+                        val guideColor = Color(0xFFEC4899) 
+                        val snapColor = Color(0xFF06B6D4) 
+                        val textBgColor = Color.Black.copy(alpha = 0.75f)
+                        val linePaint = androidx.compose.ui.graphics.Paint().asFrameworkPaint().apply {
+                            color = guideColor.toArgb()
+                            strokeWidth = 2f
+                            style = android.graphics.Paint.Style.STROKE
+                            pathEffect = android.graphics.DashPathEffect(floatArrayOf(10f, 10f), 0f)
+                        }
+                        val snapPaint = androidx.compose.ui.graphics.Paint().asFrameworkPaint().apply {
+                            color = snapColor.toArgb()
+                            strokeWidth = 3f
+                            style = android.graphics.Paint.Style.STROKE
+                        }
+
+                        // Draw Vertical matched lines
+                        for (x in dragInfo.matchedVLines) {
+                            drawContext.canvas.nativeCanvas.drawLine(
+                                x, 0f, x, size.height,
+                                if (dragInfo.isSnapX) snapPaint else linePaint
+                            )
+                        }
+
+                        // Draw Horizontal matched lines
+                        for (y in dragInfo.matchedHLines) {
+                            drawContext.canvas.nativeCanvas.drawLine(
+                                0f, y, size.width, y,
+                                if (dragInfo.isSnapY) snapPaint else linePaint
+                            )
+                        }
+
+                        // Coordinates
+                        val dL = dragInfo.translationX
+                        val dT = dragInfo.translationY
+                        val dW = dragInfo.width
+                        val dH = dragInfo.height
+                        val dR = dL + dW
+                        val dB = dT + dH
+                        val dCX = dL + dW / 2f
+                        val dCY = dT + dH / 2f
+
+                        val textPaint = android.graphics.Paint().apply {
+                            color = android.graphics.Color.WHITE
+                            textSize = 24f
+                            textAlign = android.graphics.Paint.Align.CENTER
+                            isAntiAlias = true
+                            typeface = android.graphics.Typeface.create(android.graphics.Typeface.MONOSPACE, android.graphics.Typeface.BOLD)
+                        }
+
+                        fun drawDimensionLabel(text: String, x: Float, y: Float) {
+                            val textBounds = android.graphics.Rect()
+                            textPaint.getTextBounds(text, 0, text.length, textBounds)
+                            val padW = 10f
+                            val padH = 6f
+                            val rx = x - textBounds.width() / 2f - padW
+                            val ry = y - textBounds.height() / 2f - padH
+                            val rw = textBounds.width() + padW * 2f
+                            val rh = textBounds.height() + padH * 2f
+                            
+                            drawRect(
+                                color = textBgColor,
+                                topLeft = Offset(rx, ry),
+                                size = androidx.compose.ui.geometry.Size(rw, rh),
+                                style = androidx.compose.ui.graphics.drawscope.Fill
+                            )
+                            drawContext.canvas.nativeCanvas.drawText(
+                                text,
+                                x,
+                                y + textBounds.height() / 2f,
+                                textPaint
+                            )
+                        }
+
+                        // Left border distance
+                        if (dL > 10f) {
+                            val midY = dCY
+                            drawContext.canvas.nativeCanvas.drawLine(
+                                0f, midY, dL, midY,
+                                linePaint
+                            )
+                            val distDp = (dL / density).toInt()
+                            drawDimensionLabel("$distDp dp", dL / 2f, midY - 10f)
+                        }
+
+                        // Right border distance
+                        if (size.width - dR > 10f) {
+                            val midY = dCY
+                            drawContext.canvas.nativeCanvas.drawLine(
+                                dR, midY, size.width, midY,
+                                linePaint
+                            )
+                            val distDp = ((size.width - dR) / density).toInt()
+                            drawDimensionLabel("$distDp dp", dR + (size.width - dR) / 2f, midY - 10f)
+                        }
+
+                        // Top border distance
+                        if (dT > 10f) {
+                            val midX = dCX
+                            drawContext.canvas.nativeCanvas.drawLine(
+                                midX, 0f, midX, dT,
+                                linePaint
+                            )
+                            val distDp = (dT / density).toInt()
+                            drawDimensionLabel("$distDp dp", midX, dT / 2f)
+                        }
+
+                        // Bottom border distance
+                        if (size.height - dB > 10f) {
+                            val midX = dCX
+                            drawContext.canvas.nativeCanvas.drawLine(
+                                midX, dB, midX, size.height,
+                                linePaint
+                            )
+                            val distDp = ((size.height - dB) / density).toInt()
+                            drawDimensionLabel("$distDp dp", midX, dB + (size.height - dB) / 2f)
+                        }
+
+                        // Gaps to matched targets
+                        for (target in dragInfo.matchedTargets) {
+                            if (target.id != "canvas") {
+                                if (target.right <= dL) {
+                                    val gapY = (maxOf(target.top, dT) + minOf(target.bottom, dB)) / 2f
+                                    drawContext.canvas.nativeCanvas.drawLine(
+                                        target.right, gapY, dL, gapY,
+                                        snapPaint
+                                    )
+                                    val distDp = ((dL - target.right) / density).toInt()
+                                    drawDimensionLabel("$distDp dp", target.right + (dL - target.right) / 2f, gapY - 12f)
+                                } else if (target.left >= dR) {
+                                    val gapY = (maxOf(target.top, dT) + minOf(target.bottom, dB)) / 2f
+                                    drawContext.canvas.nativeCanvas.drawLine(
+                                        dR, gapY, target.left, gapY,
+                                        snapPaint
+                                    )
+                                    val distDp = ((target.left - dR) / density).toInt()
+                                    drawDimensionLabel("$distDp dp", dR + (target.left - dR) / 2f, gapY - 12f)
+                                }
+
+                                if (target.bottom <= dT) {
+                                    val gapX = (maxOf(target.left, dL) + minOf(target.right, dR)) / 2f
+                                    drawContext.canvas.nativeCanvas.drawLine(
+                                        gapX, target.bottom, gapX, dT,
+                                        snapPaint
+                                    )
+                                    val distDp = ((dT - target.bottom) / density).toInt()
+                                    drawDimensionLabel("$distDp dp", gapX, target.bottom + (dT - target.bottom) / 2f)
+                                } else if (target.top >= dB) {
+                                    val gapX = (maxOf(target.left, dL) + minOf(target.right, dR)) / 2f
+                                    drawContext.canvas.nativeCanvas.drawLine(
+                                        gapX, dB, gapX, target.top,
+                                        snapPaint
+                                    )
+                                    val distDp = ((target.top - dB) / density).toInt()
+                                    drawDimensionLabel("$distDp dp", gapX, dB + (target.top - dB) / 2f)
+                                }
+                            }
+                        }
+
+                        if (Math.abs(dragInfo.rotation) > 0.1f) {
+                            val angleText = "${String.format("%.1f", dragInfo.rotation)}°"
+                            drawDimensionLabel(angleText, dCX, dT - 35f)
+                        }
+                    }
+                }
+
                 if (eyedropperTarget != null) {
                     Box(
                         modifier = Modifier
@@ -7429,7 +8097,7 @@ fun ScanEditScreen(
                                     Text(
                                         text = if (addWordTextDraft.isNotBlank()) addWordTextDraft else "Sample Text Layer Preview",
                                         fontSize = addWordFontSize.sp,
-                                        fontFamily = getFontFamily(addWordFontFamily),
+                                        fontFamily = getFontFamily(addWordFontFamily, addWordIsBold, addWordIsItalic),
                                         fontWeight = if (addWordIsBold) FontWeight.Bold else FontWeight.Normal,
                                         fontStyle = if (addWordIsItalic) FontStyle.Italic else FontStyle.Normal,
                                         textDecoration = when {
@@ -7494,7 +8162,7 @@ fun ScanEditScreen(
                             Text("Font Size: ${addWordFontSize.toInt()}sp", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 IconButton(
-                                    onClick = { if (addWordFontSize > 8f) addWordFontSize -= 2f },
+                                    onClick = { if (addWordFontSize > 1f) addWordFontSize = (addWordFontSize - 2f).coerceAtLeast(1f) },
                                     modifier = Modifier.size(36.dp)
                                 ) {
                                     Icon(Icons.Default.Remove, "Decrease Size")
@@ -8006,7 +8674,7 @@ fun ScanEditScreen(
                                     Text(
                                         text = if (editWordTextDraft.isNotBlank()) editWordTextDraft else "Sample Text Layer Preview",
                                         fontSize = editWordFontSize.sp,
-                                        fontFamily = getFontFamily(editWordFontFamily),
+                                        fontFamily = getFontFamily(editWordFontFamily, editWordIsBold, editWordIsItalic),
                                         fontWeight = if (editWordIsBold) FontWeight.Bold else FontWeight.Normal,
                                         fontStyle = if (editWordIsItalic) FontStyle.Italic else FontStyle.Normal,
                                         textDecoration = when {
@@ -8071,7 +8739,7 @@ fun ScanEditScreen(
                             Text("Font Size: ${editWordFontSize.toInt()}sp", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 IconButton(
-                                    onClick = { if (editWordFontSize > 8f) editWordFontSize -= 2f },
+                                    onClick = { if (editWordFontSize > 1f) editWordFontSize = (editWordFontSize - 2f).coerceAtLeast(1f) },
                                     modifier = Modifier.size(36.dp)
                                 ) {
                                     Icon(Icons.Default.Remove, "Decrease Size")
@@ -10639,7 +11307,7 @@ fun StaticPagePreview(
                         text = txtAnn.text,
                         color = textColor,
                         fontSize = (txtAnn.fontSize * (widthDp.value / 400f)).sp,
-                        fontFamily = getFontFamily(txtAnn.fontName),
+                        fontFamily = getFontFamily(txtAnn.fontName, txtAnn.isBold, txtAnn.isItalic),
                         fontWeight = if (txtAnn.isBold) FontWeight.Bold else FontWeight.Normal,
                         fontStyle = if (txtAnn.isItalic) FontStyle.Italic else FontStyle.Normal,
                         textDecoration = androidx.compose.ui.text.style.TextDecoration.combine(
@@ -11321,6 +11989,10 @@ fun CollagePortionView(
                 val flipH = item.flipHorizontal
                 val flipV = item.flipVertical
 
+                val currentRotation by androidx.compose.runtime.rememberUpdatedState(rotation)
+                val currentFlipH by androidx.compose.runtime.rememberUpdatedState(flipH)
+                val currentFlipV by androidx.compose.runtime.rememberUpdatedState(flipV)
+
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -11328,7 +12000,7 @@ fun CollagePortionView(
                             detectTransformGestures { _, pan, zoomAmount, _ ->
                                 scale = (scale * zoomAmount).coerceIn(0.5f, 5.0f)
                                 offset = offset + pan
-                                onUpdateProperties(rotation, flipH, flipV, scale, offset.x, offset.y)
+                                onUpdateProperties(currentRotation, currentFlipH, currentFlipV, scale, offset.x, offset.y)
                             }
                         }
                         .pointerInput(item.imagePath) {
@@ -11343,7 +12015,7 @@ fun CollagePortionView(
                                     val sW = imgW * fitScale
                                     val sH = imgH * fitScale
                                     
-                                    val rad = Math.toRadians(rotation.toDouble())
+                                    val rad = Math.toRadians(currentRotation.toDouble())
                                     val cos = Math.abs(Math.cos(rad))
                                     val sin = Math.abs(Math.sin(rad))
                                     val rotW = sW * cos + sH * sin
@@ -11353,7 +12025,7 @@ fun CollagePortionView(
                                     
                                     scale = finalScale
                                     offset = Offset.Zero
-                                    onUpdateProperties(rotation, flipH, flipV, finalScale, 0f, 0f)
+                                    onUpdateProperties(currentRotation, currentFlipH, currentFlipV, finalScale, 0f, 0f)
                                 }
                             )
                         }
@@ -11453,8 +12125,8 @@ fun CollageEditorView(
         val pageW = maxWidth
         val pageH = maxHeight
         
-        val rectW = pageW * 0.9f
-        val rectH = pageH * 0.45f
+        val rectW = pageW * 0.95f
+        val rectH = pageH * 0.475f
         
         Column(modifier = Modifier.fillMaxSize()) {
             // Top Half
@@ -11468,7 +12140,6 @@ fun CollageEditorView(
                 Box(
                     modifier = Modifier
                         .size(rectW, rectH)
-                        .border(1.dp, Color.Gray.copy(alpha = 0.4f), RoundedCornerShape(2.dp))
                         .background(Color(0xFFFAFAFA))
                 ) {
                     CollagePortionView(
@@ -11517,7 +12188,6 @@ fun CollageEditorView(
                 Box(
                     modifier = Modifier
                         .size(rectW, rectH)
-                        .border(1.dp, Color.Gray.copy(alpha = 0.4f), RoundedCornerShape(2.dp))
                         .background(Color(0xFFFAFAFA))
                 ) {
                     CollagePortionView(
@@ -11549,5 +12219,32 @@ fun CollageEditorView(
         }
     }
 }
+
+data class SmartGuideDragInfo(
+    val id: String,
+    val isText: Boolean,
+    val translationX: Float,
+    val translationY: Float,
+    val width: Float,
+    val height: Float,
+    val rotation: Float,
+    val matchedVLines: List<Float> = emptyList(),
+    val matchedHLines: List<Float> = emptyList(),
+    val matchedTargets: List<SmartGuideTarget> = emptyList(),
+    val isSnapX: Boolean = false,
+    val isSnapY: Boolean = false
+)
+
+data class SmartGuideTarget(
+    val id: String,
+    val name: String,
+    val left: Float,
+    val top: Float,
+    val right: Float,
+    val bottom: Float,
+    val centerX: Float = (left + right) / 2f,
+    val centerY: Float = (top + bottom) / 2f
+)
+
 
 

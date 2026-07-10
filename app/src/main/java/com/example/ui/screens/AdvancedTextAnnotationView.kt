@@ -47,6 +47,12 @@ class AdvancedTextAnnotationView @JvmOverloads constructor(
             invalidate()
         }
 
+    var isOutlineVisible: Boolean = true
+        set(value) {
+            field = value
+            invalidate()
+        }
+
     var isEditing: Boolean = false
         private set
 
@@ -83,6 +89,10 @@ class AdvancedTextAnnotationView @JvmOverloads constructor(
     var onDefChanged: ((TextAnnotationDef) -> Unit)? = null
     var onSelected: (() -> Unit)? = null
     var onDeleteRequested: (() -> Unit)? = null
+
+    var onDragStarted: (() -> Unit)? = null
+    var onDragging: ((view: View, tx: Float, ty: Float, width: Float, height: Float, rotation: Float) -> Unit)? = null
+    var onDragEnded: (() -> Unit)? = null
 
     init {
         setWillNotDraw(false)
@@ -173,6 +183,7 @@ class AdvancedTextAnnotationView @JvmOverloads constructor(
 
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                isOutlineVisible = true
                 onSelected?.invoke()
                 isSelectedState = true
 
@@ -194,6 +205,7 @@ class AdvancedTextAnnotationView @JvmOverloads constructor(
                 } else {
                     isDragging = true
                     isResizing = false
+                    onDragStarted?.invoke()
                 }
 
                 lastX = rawX
@@ -216,6 +228,7 @@ class AdvancedTextAnnotationView @JvmOverloads constructor(
                 } else if (isDragging && !isEditing) {
                     translationX += dx
                     translationY += dy
+                    onDragging?.invoke(this, translationX, translationY, width.toFloat(), height.toFloat(), rotation)
                 }
 
                 lastX = rawX
@@ -225,10 +238,14 @@ class AdvancedTextAnnotationView @JvmOverloads constructor(
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 if (isDragging || isResizing) {
+                    val wasDragging = isDragging
                     isDragging = false
                     isResizing = false
                     parent?.requestDisallowInterceptTouchEvent(false)
                     pushChange()
+                    if (wasDragging) {
+                        onDragEnded?.invoke()
+                    }
                 }
                 return true
             }
@@ -251,7 +268,7 @@ class AdvancedTextAnnotationView @JvmOverloads constructor(
             TextAnnotationRenderer.draw(canvas, def.copy(rotation = 0f), -lastBounds.left, -lastBounds.top, refWidthPx, isMainContent)
         }
 
-        if (isSelectedState) {
+        if (isSelectedState && isOutlineVisible) {
             canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), borderPaint)
             canvas.drawCircle(0f, 0f, handleRadius, handlePaint)
             canvas.drawCircle(0f, 0f, handleRadius, handleBorderPaint)
