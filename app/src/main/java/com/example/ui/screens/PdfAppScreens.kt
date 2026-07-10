@@ -122,6 +122,42 @@ fun getFontFamily(fontName: String?, isBold: Boolean = false, isItalic: Boolean 
 }
 
 @Composable
+fun SpeedDialItem(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(horizontal = 14.dp, vertical = 10.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier.size(16.dp)
+            )
+        }
+        Spacer(modifier = Modifier.width(12.dp))
+        Text(
+            text = label,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+    }
+}
+
+@Composable
 fun SelectableFeatureButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     label: String,
@@ -463,17 +499,81 @@ fun DashboardScreen(
         }
     }
 
+    var isFabMenuExpanded by remember { mutableStateOf(false) }
+
     val categories = listOf("All", "Combine", "Scan", "ID Card", "Blank Doc")
 
     Scaffold(
         floatingActionButton = {
-            FloatingActionButton(
-                onClick = { showCreateDialog = true },
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = Color.White,
-                modifier = Modifier.testTag("add_btn")
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Icon(Icons.Default.Add, contentDescription = "Create Document")
+                if (isFabMenuExpanded) {
+                    Card(
+                        modifier = Modifier
+                            .width(180.dp)
+                            .padding(bottom = 8.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        ) {
+                            // 1. Quick Scan
+                            SpeedDialItem(
+                                icon = Icons.Default.DocumentScanner,
+                                label = "Quick Scan",
+                                onClick = {
+                                    isFabMenuExpanded = false
+                                    viewModel.resetScanner(isIdMode = false)
+                                    viewModel.navigateTo(Screen.ScanCamera)
+                                }
+                            )
+                            // 2. Scan ID Card
+                            SpeedDialItem(
+                                icon = Icons.Default.CreditCard,
+                                label = "Scan ID Card",
+                                onClick = {
+                                    isFabMenuExpanded = false
+                                    viewModel.resetIdScanner()
+                                    viewModel.navigateTo(Screen.IdScanCamera)
+                                }
+                            )
+                            // 3. Combine File
+                            SpeedDialItem(
+                                icon = Icons.Default.MergeType,
+                                label = "Combine File",
+                                onClick = {
+                                    isFabMenuExpanded = false
+                                    showCombineSourceDialog = true
+                                }
+                            )
+                            // 4. Local File
+                            SpeedDialItem(
+                                icon = Icons.Default.FolderOpen,
+                                label = "Local File",
+                                onClick = {
+                                    isFabMenuExpanded = false
+                                    singleFilePickerLauncher.launch("*/*")
+                                }
+                            )
+                        }
+                    }
+                }
+
+                FloatingActionButton(
+                    onClick = { isFabMenuExpanded = !isFabMenuExpanded },
+                    containerColor = if (isFabMenuExpanded) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.primary,
+                    contentColor = if (isFabMenuExpanded) MaterialTheme.colorScheme.onPrimaryContainer else Color.White,
+                    modifier = Modifier.testTag("add_btn")
+                ) {
+                    Icon(
+                        imageVector = if (isFabMenuExpanded) Icons.Default.Close else Icons.Default.Add,
+                        contentDescription = "Toggle Menu"
+                    )
+                }
             }
         },
         modifier = modifier
