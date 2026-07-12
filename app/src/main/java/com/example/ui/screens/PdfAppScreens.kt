@@ -11494,7 +11494,7 @@ fun StaticPagePreview(
 
         Card(
             modifier = Modifier
-                .size(width = cardWidth, height = cardHeight)
+                .requiredSize(width = cardWidth, height = cardHeight)
                 .graphicsLayer(rotationZ = page.rotationDegrees.toFloat())
                 .shadow(6.dp, RoundedCornerShape(4.dp))
                 .background(Color.White),
