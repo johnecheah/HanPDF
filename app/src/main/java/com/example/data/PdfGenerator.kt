@@ -125,7 +125,9 @@ object PdfGenerator {
 
                 // 1b. Apply page rotation around center
                 if (pageDef.rotationDegrees != 0) {
-                    canvas.rotate(pageDef.rotationDegrees.toFloat(), finalW / 2f, finalH / 2f)
+                    canvas.translate(finalW / 2f, finalH / 2f)
+                    canvas.rotate(pageDef.rotationDegrees.toFloat())
+                    canvas.translate(-curW / 2f, -curH / 2f)
                 }
 
                 // 2. Draw standard templates if scan background is missing
@@ -142,10 +144,10 @@ object PdfGenerator {
                             originalBmp
                         }
                         val rect = RectF(
-                            (finalW - curW) / 2f,
-                            (finalH - curH) / 2f,
-                            (finalW + curW) / 2f,
-                            (finalH + curH) / 2f
+                            0f,
+                            0f,
+                            curW.toFloat(),
+                            curH.toFloat()
                         )
                         canvas.drawBitmap(bitmap, null, rect, Paint(Paint.FILTER_BITMAP_FLAG))
                         bitmap.recycle()

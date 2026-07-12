@@ -5644,6 +5644,10 @@ fun ScanEditScreen(
                                             val newRotation = (pageRotationDegrees + 90) % 360
                                             pageRotationDegrees = newRotation
                                             viewModel.editActivePageRotation(newRotation)
+                                            // Clear any leftover pan so the freshly-rotated
+                                            // canvas re-centers instead of drifting off-screen.
+                                            offsetX = 0f
+                                            offsetY = 0f
                                         },
                                         modifier = Modifier
                                             .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape)
@@ -7157,14 +7161,29 @@ fun ScanEditScreen(
                     }
                 }
                 
+                // How much extra shrink is needed so the ROTATED canvas footprint
+                // (width/height swap visually at 90/270 degrees) still fits inside
+                // the visible viewport, since graphicsLayer's rotationZ only rotates
+                // the painted content — it never changes the box's own layout size.
+                val rotationFitScale = remember(pageRotationDegrees, pageRatio, maxWidth, maxHeight) {
+                    val isRotated90or270 = pageRotationDegrees % 180 != 0
+                    if (isRotated90or270) {
+                        val naturalHeight = maxHeight.value
+                        val naturalWidth = minOf(naturalHeight * pageRatio, maxWidth.value)
+                        minOf(1f, maxWidth.value / naturalHeight, maxHeight.value / naturalWidth)
+                    } else {
+                        1f
+                    }
+                }
+
                 // Nested transformation container that scales, translates, and rotates dynamically!
                 Box(
                     modifier = Modifier
                         .align(Alignment.Center)
                         .aspectRatio(pageRatio, matchHeightConstraintsFirst = true)
                         .graphicsLayer(
-                            scaleX = scale,
-                            scaleY = scale,
+                            scaleX = scale * rotationFitScale,
+                            scaleY = scale * rotationFitScale,
                             translationX = offsetX,
                             translationY = offsetY,
                             rotationZ = pageRotationDegrees.toFloat()
@@ -8191,7 +8210,7 @@ fun ScanEditScreen(
                                     value = activePage.contrast,
                                     onValueChange = { viewModel.editActivePageAdjustments(activePage.brightness, it, activePage.saturation, activePage.shade) },
                                     onValueChangeFinished = { viewModel.pushAdjustmentsUndo() },
-                                    valueRange = 0.2f..2.5f,
+                                    valueRange = 0.25f..1.75f, // symmetric around default 1.0f, so thumb sits centered
                                     modifier = Modifier.weight(1f).height(24.dp)
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
@@ -8210,7 +8229,7 @@ fun ScanEditScreen(
                                     value = activePage.saturation,
                                     onValueChange = { viewModel.editActivePageAdjustments(activePage.brightness, activePage.contrast, it, activePage.shade) },
                                     onValueChangeFinished = { viewModel.pushAdjustmentsUndo() },
-                                    valueRange = 0.0f..2.5f,
+                                    valueRange = 0f..2f, // symmetric around default 1.0f, so thumb sits centered
                                     modifier = Modifier.weight(1f).height(24.dp)
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
@@ -9518,7 +9537,6 @@ fun ScanEditScreen(
                                     viewModel = viewModel,
                                     modifier = Modifier
                                         .weight(1f, fill = false)
-                                        .aspectRatio(0.707f)
                                 )
                                 
                                 Spacer(modifier = Modifier.height(16.dp))
@@ -9598,8 +9616,41 @@ fun MutableList<SignatureOverlayDef>.signatureSync(list: List<SignatureOverlayDe
 fun stickerDefaultText() = "Acrobatic PDF Note"
 
 object AndroidBitmapLoader {
+    // Preview only needs to be sharp enough for on-screen display. Decoding and
+    // filtering at full camera resolution (often 3000-4000px+) on every slider
+    // tick is what makes Brightness/Contrast/Saturation/Shade feel laggy.
+    // This only affects the live preview - PdfGenerator.decodeAndScaleBackground()
+    // handles the real export resolution separately, so saved PDF quality is unchanged.
+    private const val PREVIEW_MAX_DIM = 1600
+
     fun load(path: String): Bitmap? = try {
-        BitmapFactory.decodeFile(path)
+        val boundsOptions = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(path, boundsOptions)
+        val origW = boundsOptions.outWidth
+        val origH = boundsOptions.outHeight
+
+        var sampleSize = 1
+        if (origW > 0 && origH > 0) {
+            val largestDim = maxOf(origW, origH)
+            while (largestDim / sampleSize > PREVIEW_MAX_DIM * 2) {
+                sampleSize *= 2
+            }
+        }
+
+        val decodeOptions = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+        val sampled = BitmapFactory.decodeFile(path, decodeOptions) ?: return null
+
+        val largest = maxOf(sampled.width, sampled.height)
+        if (largest > PREVIEW_MAX_DIM) {
+            val scale = PREVIEW_MAX_DIM.toFloat() / largest
+            val targetW = (sampled.width * scale).toInt().coerceAtLeast(1)
+            val targetH = (sampled.height * scale).toInt().coerceAtLeast(1)
+            val scaled = Bitmap.createScaledBitmap(sampled, targetW, targetH, true)
+            if (scaled != sampled) sampled.recycle()
+            scaled
+        } else {
+            sampled
+        }
     } catch (e: Exception) {
         null
     }
@@ -11424,19 +11475,35 @@ fun StaticPagePreview(
     modifier: Modifier = Modifier
 ) {
     val isLandscape = page.rotationDegrees % 180 != 0
-    val pageRatio = 0.707f
+    val nativeRatio = 0.707f
+    // The outer footprint reflects the page's FINAL rotated shape (swapped for
+    // 90/270 degrees) - this is what callers' modifiers (fillMaxWidth, weight, etc)
+    // size against, so Continuous Scroll and Presentation Preview both fit correctly.
+    val outerRatio = if (isLandscape) 1f / nativeRatio else nativeRatio
 
-    Card(
-        modifier = modifier
-            .aspectRatio(pageRatio)
-            .shadow(6.dp, RoundedCornerShape(4.dp))
-            .background(Color.White),
-        shape = RoundedCornerShape(4.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White)
+    BoxWithConstraints(
+        modifier = modifier.aspectRatio(outerRatio),
+        contentAlignment = Alignment.Center
     ) {
-        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-            val widthDp = maxWidth
-            val heightDp = maxHeight
+        // The card itself is always laid out and drawn in native (unrotated)
+        // proportions - matching every collage/box percentage calculated below -
+        // then visually rotated to exactly fill the outer (possibly swapped)
+        // footprint. Same centering approach as PdfGenerator uses for export.
+        val cardWidth = if (isLandscape) maxHeight else maxWidth
+        val cardHeight = if (isLandscape) maxWidth else maxHeight
+
+        Card(
+            modifier = Modifier
+                .size(width = cardWidth, height = cardHeight)
+                .graphicsLayer(rotationZ = page.rotationDegrees.toFloat())
+                .shadow(6.dp, RoundedCornerShape(4.dp))
+                .background(Color.White),
+            shape = RoundedCornerShape(4.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White)
+        ) {
+            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                val widthDp = maxWidth
+                val heightDp = maxHeight
             
             // 1. Background image or Collage layout
             if (page.type.lowercase() == "collage") {
@@ -11747,6 +11814,7 @@ fun StaticPagePreview(
                 }
             }
         }
+    }
     }
 }
 
