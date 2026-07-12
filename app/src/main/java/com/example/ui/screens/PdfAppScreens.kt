@@ -995,7 +995,7 @@ fun DashboardScreen(
                         Spacer(modifier = Modifier.height(18.dp))
                         
                         Text(
-                            text = "Created by\nJohne Cheah\n@2026\n \nVersion V2.1",
+                            text = "Created by\nJohne Cheah\n@2026\n \nVersion V2.2",
                             fontSize = 15.sp,
                             lineHeight = 22.sp,
                             fontWeight = FontWeight.Bold,
@@ -4897,6 +4897,7 @@ fun ScanEditScreen(
 
     var showSignatureSelectionDrawer by remember { mutableStateOf(false) }
     var showFilterDropdown by remember { mutableStateOf(false) }
+    var showFineTuneAdjustments by remember { mutableStateOf(false) }
     var annotationMode by remember { mutableStateOf("none") } // "none", "draw", "erase", "signature_overlay"
     var drawColorHex by remember { mutableStateOf("#D62246") } // Defaults to Red Pencil
     var drawStrokeWidth by remember { mutableFloatStateOf(6f) }
@@ -4987,8 +4988,8 @@ fun ScanEditScreen(
                 if (file.exists()) {
                     val base = AndroidBitmapLoader.load(file.absolutePath)
                     if (base != null) {
-                        val filtered = if (activePage.filterType != "original") {
-                            viewModel.applyFilterToBitmap(base, activePage.filterType)
+                        val filtered = if (activePage.filterType != "original" || activePage.brightness != 0f || activePage.contrast != 1f || activePage.saturation != 1f || activePage.shade != 0f) {
+                            viewModel.applyFilterToBitmap(base, activePage.filterType, activePage.brightness, activePage.contrast, activePage.saturation, activePage.shade)
                         } else {
                             base
                         }
@@ -6502,7 +6503,27 @@ fun ScanEditScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
-                                Text("Enhance Scanned Document", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("Enhance Scanned Document", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                                    FilledIconButton(
+                                        onClick = { showFineTuneAdjustments = !showFineTuneAdjustments },
+                                        modifier = Modifier.size(32.dp),
+                                        colors = IconButtonDefaults.filledIconButtonColors(
+                                            containerColor = if (showFineTuneAdjustments) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                            contentColor = if (showFineTuneAdjustments) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Tune,
+                                            contentDescription = "Fine-Tune Adjustments",
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -6629,7 +6650,18 @@ fun ScanEditScreen(
                                                     .clickable { viewModel.setActivePageId(page.id) }
                                             ) {
                                                 if (page.backgroundScanPath != null && java.io.File(page.backgroundScanPath).exists()) {
-                                                    val bitmap = remember(page.id, page.backgroundScanPath) { AndroidBitmapLoader.load(page.backgroundScanPath) }
+                                                    val bitmap = remember(page.id, page.filterType, page.brightness, page.contrast, page.saturation, page.shade, page.backgroundScanPath) {
+                                                        val base = AndroidBitmapLoader.load(page.backgroundScanPath)
+                                                        if (base != null && (page.filterType != "original" || page.brightness != 0f || page.contrast != 1f || page.saturation != 1f || page.shade != 0f)) {
+                                                            val filtered = viewModel.applyFilterToBitmap(base, page.filterType, page.brightness, page.contrast, page.saturation, page.shade)
+                                                            if (filtered != base) {
+                                                                base.recycle()
+                                                            }
+                                                            filtered
+                                                        } else {
+                                                            base
+                                                        }
+                                                    }
                                                     if (bitmap != null) {
                                                         Image(
                                                             bitmap = bitmap.asImageBitmap(),
@@ -6821,7 +6853,18 @@ fun ScanEditScreen(
                                             .clickable { viewModel.setActivePageId(page.id) }
                                     ) {
                                         if (page.backgroundScanPath != null && File(page.backgroundScanPath).exists()) {
-                                            val bitmap = remember(page.id, page.backgroundScanPath) { AndroidBitmapLoader.load(page.backgroundScanPath) }
+                                            val bitmap = remember(page.id, page.filterType, page.brightness, page.contrast, page.saturation, page.shade, page.backgroundScanPath) {
+                                                val base = AndroidBitmapLoader.load(page.backgroundScanPath)
+                                                if (base != null && (page.filterType != "original" || page.brightness != 0f || page.contrast != 1f || page.saturation != 1f || page.shade != 0f)) {
+                                                    val filtered = viewModel.applyFilterToBitmap(base, page.filterType, page.brightness, page.contrast, page.saturation, page.shade)
+                                                    if (filtered != base) {
+                                                        base.recycle()
+                                                    }
+                                                    filtered
+                                                } else {
+                                                    base
+                                                }
+                                            }
                                             if (bitmap != null) {
                                                 Image(
                                                     bitmap = bitmap.asImageBitmap(),
@@ -7162,10 +7205,10 @@ fun ScanEditScreen(
                     if (activePage.backgroundScanPath != null) {
                         val file = File(activePage.backgroundScanPath)
                         if (file.exists()) {
-                            val bitmap = remember(activePage.id, activePage.filterType, activePage.backgroundScanPath) {
+                            val bitmap = remember(activePage.id, activePage.filterType, activePage.brightness, activePage.contrast, activePage.saturation, activePage.shade, activePage.backgroundScanPath) {
                                 val base = AndroidBitmapLoader.load(file.absolutePath)
-                                if (base != null && activePage.filterType != "original") {
-                                    val filtered = viewModel.applyFilterToBitmap(base, activePage.filterType)
+                                if (base != null && (activePage.filterType != "original" || activePage.brightness != 0f || activePage.contrast != 1f || activePage.saturation != 1f || activePage.shade != 0f)) {
+                                    val filtered = viewModel.applyFilterToBitmap(base, activePage.filterType, activePage.brightness, activePage.contrast, activePage.saturation, activePage.shade)
                                     if (filtered != base) {
                                         base.recycle()
                                     }
@@ -8044,6 +8087,155 @@ fun ScanEditScreen(
                                 .background(Color.White, CircleShape)
                                 .padding(8.dp)
                         )
+                    }
+                }
+
+                if (showFineTuneAdjustments) {
+                    Card(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(16.dp)
+                            .widthIn(max = 340.dp)
+                            .fillMaxWidth()
+                            .shadow(12.dp, RoundedCornerShape(12.dp)),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surface,
+                            contentColor = MaterialTheme.colorScheme.onSurface
+                        ),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Default.Tune,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        "Fine-Tune Adjustments",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (activePage.brightness != 0f || activePage.contrast != 1f || activePage.saturation != 1f || activePage.shade != 0f) {
+                                        Text(
+                                            text = "Reset",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier
+                                                .clickable {
+                                                    viewModel.pushAdjustmentsUndo()
+                                                    viewModel.editActivePageAdjustments(0f, 1f, 1f, 0f)
+                                                }
+                                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                        )
+                                    }
+                                    IconButton(
+                                        onClick = { showFineTuneAdjustments = false },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Close Adjustments",
+                                            modifier = Modifier.size(16.dp),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                            // 1. Brightness Slider (-100 to 100)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.LightMode, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.secondary)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Brightness", fontSize = 11.sp, modifier = Modifier.width(65.dp), color = MaterialTheme.colorScheme.onSurface)
+                                Slider(
+                                    value = activePage.brightness,
+                                    onValueChange = { viewModel.editActivePageAdjustments(it, activePage.contrast, activePage.saturation, activePage.shade) },
+                                    onValueChangeFinished = { viewModel.pushAdjustmentsUndo() },
+                                    valueRange = -100f..100f,
+                                    modifier = Modifier.weight(1f).height(24.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("${activePage.brightness.toInt()}", fontSize = 11.sp, modifier = Modifier.width(30.dp), fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                            }
+
+                            // 2. Contrast Slider (0.2 to 2.5)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.Contrast, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.secondary)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Contrast", fontSize = 11.sp, modifier = Modifier.width(65.dp), color = MaterialTheme.colorScheme.onSurface)
+                                Slider(
+                                    value = activePage.contrast,
+                                    onValueChange = { viewModel.editActivePageAdjustments(activePage.brightness, it, activePage.saturation, activePage.shade) },
+                                    onValueChangeFinished = { viewModel.pushAdjustmentsUndo() },
+                                    valueRange = 0.2f..2.5f,
+                                    modifier = Modifier.weight(1f).height(24.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(String.format("%.1fx", activePage.contrast), fontSize = 11.sp, modifier = Modifier.width(30.dp), fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                            }
+
+                            // 3. Saturation Slider (0.0 to 2.5)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.Palette, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.secondary)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Saturation", fontSize = 11.sp, modifier = Modifier.width(65.dp), color = MaterialTheme.colorScheme.onSurface)
+                                Slider(
+                                    value = activePage.saturation,
+                                    onValueChange = { viewModel.editActivePageAdjustments(activePage.brightness, activePage.contrast, it, activePage.shade) },
+                                    onValueChangeFinished = { viewModel.pushAdjustmentsUndo() },
+                                    valueRange = 0.0f..2.5f,
+                                    modifier = Modifier.weight(1f).height(24.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(String.format("%.1fx", activePage.saturation), fontSize = 11.sp, modifier = Modifier.width(30.dp), fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                            }
+
+                            // 4. Shade Slider (-100 to 100)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.Tonality, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.secondary)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Shade", fontSize = 11.sp, modifier = Modifier.width(65.dp), color = MaterialTheme.colorScheme.onSurface)
+                                Slider(
+                                    value = activePage.shade,
+                                    onValueChange = { viewModel.editActivePageAdjustments(activePage.brightness, activePage.contrast, activePage.saturation, it) },
+                                    onValueChangeFinished = { viewModel.pushAdjustmentsUndo() },
+                                    valueRange = -100f..100f,
+                                    modifier = Modifier.weight(1f).height(24.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("${activePage.shade.toInt()}", fontSize = 11.sp, modifier = Modifier.width(30.dp), fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                            }
+                        }
                     }
                 }
             }
@@ -9948,7 +10140,18 @@ fun MergerScreen(
                                         .clip(RoundedCornerShape(6.dp))
                                 ) {
                                     if (page.backgroundScanPath != null && File(page.backgroundScanPath).exists()) {
-                                        val bitmap = remember(page.id, page.backgroundScanPath) { AndroidBitmapLoader.load(page.backgroundScanPath) }
+                                        val bitmap = remember(page.id, page.filterType, page.brightness, page.contrast, page.saturation, page.shade, page.backgroundScanPath) {
+                                            val base = AndroidBitmapLoader.load(page.backgroundScanPath)
+                                            if (base != null && (page.filterType != "original" || page.brightness != 0f || page.contrast != 1f || page.saturation != 1f || page.shade != 0f)) {
+                                                val filtered = viewModel.applyFilterToBitmap(base, page.filterType, page.brightness, page.contrast, page.saturation, page.shade)
+                                                if (filtered != base) {
+                                                    base.recycle()
+                                                }
+                                                filtered
+                                            } else {
+                                                base
+                                            }
+                                        }
                                         if (bitmap != null) {
                                             Image(
                                                 bitmap = bitmap.asImageBitmap(),
@@ -11235,14 +11438,82 @@ fun StaticPagePreview(
             val widthDp = maxWidth
             val heightDp = maxHeight
             
-            // 1. Background image
-            if (page.backgroundScanPath != null) {
+            // 1. Background image or Collage layout
+            if (page.type.lowercase() == "collage") {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    // Top Half
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .graphicsLayer(clip = true),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        val rectW = widthDp * 0.95f
+                        val rectH = heightDp * 0.475f
+                        Box(
+                            modifier = Modifier
+                                .size(rectW, rectH)
+                                .background(Color(0xFFFAFAFA))
+                                .graphicsLayer(clip = true)
+                        ) {
+                            StaticCollagePortionView(
+                                isTop = true,
+                                item = page.collageTop,
+                                filterType = page.filterType,
+                                brightness = page.brightness,
+                                contrast = page.contrast,
+                                saturation = page.saturation,
+                                shade = page.shade,
+                                viewModel = viewModel
+                            )
+                        }
+                    }
+                    
+                    // Middle dividing line
+                    Spacer(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(1.dp)
+                            .background(Color.LightGray.copy(alpha = 0.5f))
+                    )
+                    
+                    // Bottom Half
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .graphicsLayer(clip = true),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        val rectW = widthDp * 0.95f
+                        val rectH = heightDp * 0.475f
+                        Box(
+                            modifier = Modifier
+                                .size(rectW, rectH)
+                                .background(Color(0xFFFAFAFA))
+                                .graphicsLayer(clip = true)
+                        ) {
+                            StaticCollagePortionView(
+                                isTop = false,
+                                item = page.collageBottom,
+                                filterType = page.filterType,
+                                brightness = page.brightness,
+                                contrast = page.contrast,
+                                saturation = page.saturation,
+                                shade = page.shade,
+                                viewModel = viewModel
+                            )
+                        }
+                    }
+                }
+            } else if (page.backgroundScanPath != null) {
                 val file = java.io.File(page.backgroundScanPath)
                 if (file.exists()) {
-                    val bitmap = remember(page.id, page.filterType, page.backgroundScanPath) {
+                    val bitmap = remember(page.id, page.filterType, page.brightness, page.contrast, page.saturation, page.shade, page.backgroundScanPath) {
                         val base = AndroidBitmapLoader.load(file.absolutePath)
-                        if (base != null && page.filterType != "original") {
-                            viewModel.applyFilterToBitmap(base, page.filterType)
+                        if (base != null && (page.filterType != "original" || page.brightness != 0f || page.contrast != 1f || page.saturation != 1f || page.shade != 0f)) {
+                            viewModel.applyFilterToBitmap(base, page.filterType, page.brightness, page.contrast, page.saturation, page.shade)
                         } else {
                             base
                         }
@@ -11474,6 +11745,64 @@ fun StaticPagePreview(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun StaticCollagePortionView(
+    isTop: Boolean,
+    item: com.example.data.CollageItemDef?,
+    filterType: String,
+    brightness: Float = 0f,
+    contrast: Float = 1f,
+    saturation: Float = 1f,
+    shade: Float = 0f,
+    viewModel: MainViewModel
+) {
+    if (item == null) {
+        Box(modifier = Modifier.fillMaxSize())
+    } else {
+        val bitmap = remember(item.imagePath, filterType, brightness, contrast, saturation, shade) {
+            try {
+                val base = BitmapFactory.decodeFile(item.imagePath)
+                if (base != null && (filterType != "original" || brightness != 0f || contrast != 1f || saturation != 1f || shade != 0f)) {
+                    val filtered = viewModel.applyFilterToBitmap(base, filterType, brightness, contrast, saturation, shade)
+                    if (filtered != base) {
+                        base.recycle()
+                    }
+                    filtered
+                } else {
+                    base
+                }
+            } catch (e: Exception) {
+                null
+            }
+        }
+
+        if (bitmap != null) {
+            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                val containerW = constraints.maxWidth.toFloat()
+                val containerH = constraints.maxHeight.toFloat()
+                
+                val translationX = item.offsetX * containerW
+                val translationY = item.offsetY * containerH
+                
+                Image(
+                    bitmap = bitmap.asImageBitmap(),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer(
+                            scaleX = if (item.flipHorizontal) -item.scale else item.scale,
+                            scaleY = if (item.flipVertical) -item.scale else item.scale,
+                            translationX = translationX,
+                            translationY = translationY,
+                            rotationZ = item.rotation
+                        ),
+                    contentScale = ContentScale.Fit
+                )
             }
         }
     }
@@ -12025,6 +12354,10 @@ fun CollagePortionView(
     isTop: Boolean,
     item: com.example.data.CollageItemDef?,
     filterType: String,
+    brightness: Float = 0f,
+    contrast: Float = 1f,
+    saturation: Float = 1f,
+    shade: Float = 0f,
     viewModel: MainViewModel,
     onPickImageClick: () -> Unit,
     onUpdateProperties: (rotation: Float, flipH: Boolean, flipV: Boolean, zoom: Float, offX: Float, offY: Float) -> Unit,
@@ -12062,11 +12395,11 @@ fun CollagePortionView(
                 }
             }
         } else {
-            val bitmap = remember(item.imagePath, filterType) {
+            val bitmap = remember(item.imagePath, filterType, brightness, contrast, saturation, shade) {
                 try {
                     val base = BitmapFactory.decodeFile(item.imagePath)
-                    if (base != null && filterType != "original") {
-                        val filtered = viewModel.applyFilterToBitmap(base, filterType)
+                    if (base != null && (filterType != "original" || brightness != 0f || contrast != 1f || saturation != 1f || shade != 0f)) {
+                        val filtered = viewModel.applyFilterToBitmap(base, filterType, brightness, contrast, saturation, shade)
                         if (filtered != base) {
                             base.recycle()
                         }
@@ -12080,8 +12413,11 @@ fun CollagePortionView(
             }
 
             if (bitmap != null) {
+                val containerW = constraints.maxWidth.toFloat().coerceAtLeast(1f)
+                val containerH = constraints.maxHeight.toFloat().coerceAtLeast(1f)
+
                 var scale by remember(item.imagePath) { mutableStateOf(item.scale) }
-                var offset by remember(item.imagePath) { mutableStateOf(Offset(item.offsetX, item.offsetY)) }
+                var offset by remember(item.imagePath) { mutableStateOf(Offset(item.offsetX * containerW, item.offsetY * containerH)) }
                 
                 val rotation = item.rotation
                 val flipH = item.flipHorizontal
@@ -12098,7 +12434,7 @@ fun CollagePortionView(
                             detectTransformGestures { _, pan, zoomAmount, _ ->
                                 scale = (scale * zoomAmount).coerceIn(0.5f, 5.0f)
                                 offset = offset + pan
-                                onUpdateProperties(currentRotation, currentFlipH, currentFlipV, scale, offset.x, offset.y)
+                                onUpdateProperties(currentRotation, currentFlipH, currentFlipV, scale, offset.x / containerW, offset.y / containerH)
                             }
                         }
                         .pointerInput(item.imagePath) {
@@ -12106,8 +12442,6 @@ fun CollagePortionView(
                                 onDoubleTap = {
                                     val imgW = bitmap.width.toFloat()
                                     val imgH = bitmap.height.toFloat()
-                                    val containerW = constraints.maxWidth.toFloat()
-                                    val containerH = constraints.maxHeight.toFloat()
                                     
                                     val fitScale = minOf(containerW / imgW, containerH / imgH)
                                     val sW = imgW * fitScale
@@ -12164,7 +12498,7 @@ fun CollagePortionView(
                         IconButton(
                             onClick = {
                                 val nextRot = (rotation + 90f) % 360f
-                                onUpdateProperties(nextRot, flipH, flipV, scale, offset.x, offset.y)
+                                onUpdateProperties(nextRot, flipH, flipV, scale, offset.x / containerW, offset.y / containerH)
                             },
                             modifier = Modifier.size(36.dp)
                         ) {
@@ -12173,7 +12507,7 @@ fun CollagePortionView(
 
                         IconButton(
                             onClick = {
-                                onUpdateProperties(rotation, !flipH, flipV, scale, offset.x, offset.y)
+                                onUpdateProperties(rotation, !flipH, flipV, scale, offset.x / containerW, offset.y / containerH)
                             },
                             modifier = Modifier.size(36.dp)
                         ) {
@@ -12182,7 +12516,7 @@ fun CollagePortionView(
 
                         IconButton(
                             onClick = {
-                                onUpdateProperties(rotation, flipH, !flipV, scale, offset.x, offset.y)
+                                onUpdateProperties(rotation, flipH, !flipV, scale, offset.x / containerW, offset.y / containerH)
                             },
                             modifier = Modifier.size(36.dp)
                         ) {
@@ -12244,6 +12578,10 @@ fun CollageEditorView(
                         isTop = true,
                         item = activePage.collageTop,
                         filterType = activePage.filterType,
+                        brightness = activePage.brightness,
+                        contrast = activePage.contrast,
+                        saturation = activePage.saturation,
+                        shade = activePage.shade,
                         viewModel = viewModel,
                         onPickImageClick = {
                             onChangePickingTop(true)
@@ -12292,6 +12630,10 @@ fun CollageEditorView(
                         isTop = false,
                         item = activePage.collageBottom,
                         filterType = activePage.filterType,
+                        brightness = activePage.brightness,
+                        contrast = activePage.contrast,
+                        saturation = activePage.saturation,
+                        shade = activePage.shade,
                         viewModel = viewModel,
                         onPickImageClick = {
                             onChangePickingTop(false)

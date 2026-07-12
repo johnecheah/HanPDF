@@ -73,6 +73,10 @@ data class PageDef(
     val ocrText: String? = null, // Extracted text content for OCR page index
     val rotationDegrees: Int = 0,
     val filterType: String = "original",
+    val brightness: Float = 0f,
+    val contrast: Float = 1f,
+    val saturation: Float = 1f,
+    val shade: Float = 0f,
     val collageTop: CollageItemDef? = null,
     val collageBottom: CollageItemDef? = null
 )

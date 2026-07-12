@@ -976,6 +976,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun editActivePageAdjustments(brightness: Float, contrast: Float, saturation: Float, shade: Float) {
+        val currentContent = _uiState.value.activeDocumentContent
+        val activePageId = _uiState.value.activePageId
+        
+        val updatedPages = currentContent.pages.map { page ->
+            if (page.id == activePageId) {
+                page.copy(brightness = brightness, contrast = contrast, saturation = saturation, shade = shade)
+            } else {
+                page
+            }
+        }
+        
+        _uiState.update {
+            it.copy(activeDocumentContent = currentContent.copy(pages = updatedPages))
+        }
+    }
+
+    fun pushAdjustmentsUndo() {
+        pushToUndoStack()
+    }
+
     fun addSignatureOverlay(sigDef: SignatureOverlayDef) {
         pushToUndoStack()
         val currentContent = _uiState.value.activeDocumentContent
@@ -2259,8 +2280,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun applyFilterToBitmap(bitmap: Bitmap, filterName: String): Bitmap {
-        return BitmapFilter.applyFilter(bitmap, filterName)
+    fun applyFilterToBitmap(bitmap: Bitmap, filterName: String, brightness: Float = 0f, contrast: Float = 1f, saturation: Float = 1f, shade: Float = 0f): Bitmap {
+        return BitmapFilter.applyFilter(bitmap, filterName, brightness, contrast, saturation, shade)
     }
 
     fun compileScannedDoc(title: String) {

@@ -132,8 +132,8 @@ object PdfGenerator {
                 if (pageDef.backgroundScanPath != null) {
                     val originalBmp = decodeAndScaleBackground(pageDef.backgroundScanPath, 2480)
                     if (originalBmp != null) {
-                        val bitmap = if (pageDef.filterType != "original") {
-                            val filtered = BitmapFilter.applyFilter(originalBmp, pageDef.filterType)
+                        val bitmap = if (pageDef.filterType != "original" || pageDef.brightness != 0f || pageDef.contrast != 1f || pageDef.saturation != 1f || pageDef.shade != 0f) {
+                            val filtered = BitmapFilter.applyFilter(originalBmp, pageDef.filterType, pageDef.brightness, pageDef.contrast, pageDef.saturation, pageDef.shade)
                             if (filtered != originalBmp) {
                                 originalBmp.recycle()
                             }
@@ -440,18 +440,18 @@ object PdfGenerator {
     private fun drawCollageTemplate(canvas: Canvas, w: Int, h: Int, pageDef: PageDef) {
         // Render top and bottom collage images if available
         pageDef.collageTop?.let { item ->
-            drawCollageItem(canvas, item, isTop = true, curW = w, curH = h, filterType = pageDef.filterType)
+            drawCollageItem(canvas, item, isTop = true, curW = w, curH = h, pageDef = pageDef)
         }
         pageDef.collageBottom?.let { item ->
-            drawCollageItem(canvas, item, isTop = false, curW = w, curH = h, filterType = pageDef.filterType)
+            drawCollageItem(canvas, item, isTop = false, curW = w, curH = h, pageDef = pageDef)
         }
     }
 
-    private fun drawCollageItem(canvas: Canvas, item: CollageItemDef, isTop: Boolean, curW: Int, curH: Int, filterType: String) {
+    private fun drawCollageItem(canvas: Canvas, item: CollageItemDef, isTop: Boolean, curW: Int, curH: Int, pageDef: PageDef) {
         val bmp = try {
             val originalBmp = BitmapFactory.decodeFile(item.imagePath)
-            if (originalBmp != null && filterType != "original") {
-                val filtered = BitmapFilter.applyFilter(originalBmp, filterType)
+            if (originalBmp != null && (pageDef.filterType != "original" || pageDef.brightness != 0f || pageDef.contrast != 1f || pageDef.saturation != 1f || pageDef.shade != 0f)) {
+                val filtered = BitmapFilter.applyFilter(originalBmp, pageDef.filterType, pageDef.brightness, pageDef.contrast, pageDef.saturation, pageDef.shade)
                 if (filtered != originalBmp) {
                     originalBmp.recycle()
                 }
@@ -502,9 +502,8 @@ object PdfGenerator {
         matrix.postScale(totalScale, totalScale)
         
         // 5. Apply translation to the center of portion, plus normalized user offset panning
-        val scaleFactor = curW.toFloat() / 400f
-        val panX = item.offsetX * scaleFactor
-        val panY = item.offsetY * scaleFactor
+        val panX = item.offsetX * rectW
+        val panY = item.offsetY * rectH
         matrix.postTranslate(centerX + panX, centerY + panY)
         
         canvas.drawBitmap(bmp, matrix, Paint(Paint.FILTER_BITMAP_FLAG))
