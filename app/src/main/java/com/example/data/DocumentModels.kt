@@ -53,6 +53,9 @@ interface DocumentDao {
 
     @Query("DELETE FROM documents WHERE id = :id")
     suspend fun deleteDocumentById(id: Int)
+
+    @Query("SELECT * FROM documents")
+    suspend fun getDocumentsSync(): List<Document>
 }
 
 @Dao
@@ -68,6 +71,9 @@ interface SignatureDao {
 
     @Query("DELETE FROM signatures WHERE id = :id")
     suspend fun deleteSignatureById(id: Int)
+
+    @Query("SELECT * FROM signatures")
+    suspend fun getSignaturesSync(): List<SignatureProfile>
 }
 
 // --- APP DATABASE ---
@@ -119,4 +125,8 @@ class DocumentRepository(private val db: AppDatabase) {
     suspend fun deleteSignature(signature: SignatureProfile) = db.signatureDao().deleteSignature(signature)
     
     suspend fun deleteSignatureById(id: Int) = db.signatureDao().deleteSignatureById(id)
+
+    suspend fun getDocumentsSync(): List<Document> = db.documentDao().getDocumentsSync()
+
+    suspend fun getSignaturesSync(): List<SignatureProfile> = db.signatureDao().getSignaturesSync()
 }

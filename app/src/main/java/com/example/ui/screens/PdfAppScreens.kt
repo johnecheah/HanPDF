@@ -995,7 +995,7 @@ fun DashboardScreen(
                         Spacer(modifier = Modifier.height(18.dp))
                         
                         Text(
-                            text = "Created by\nJohne Cheah\n@2026\n \nVersion V2.2",
+                            text = "Created by\nJohne Cheah\n@2026\n \nVersion V2.3",
                             fontSize = 15.sp,
                             lineHeight = 22.sp,
                             fontWeight = FontWeight.Bold,
@@ -1497,7 +1497,7 @@ fun DocumentListItem(
                         Icon(
                             imageVector = Icons.Default.DeleteOutline,
                             contentDescription = "Delete file",
-                            tint = MaterialTheme.colorScheme.secondary.copy(alpha = 0.5f)
+                            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
                         )
                     }
                 }
@@ -5332,7 +5332,7 @@ fun ScanEditScreen(
                                 if (isModified) {
                                     showCloseConfirmDialog = true
                                 } else {
-                                    viewModel.navigateTo(Screen.Dashboard)
+                                    viewModel.exitEditorWithoutSaving()
                                 }
                             }
                         ) {
@@ -9410,7 +9410,7 @@ fun ScanEditScreen(
             if (isModified) {
                 showCloseConfirmDialog = true
             } else {
-                viewModel.navigateTo(Screen.Dashboard)
+                viewModel.exitEditorWithoutSaving()
             }
         }
 
@@ -9458,7 +9458,7 @@ fun ScanEditScreen(
                     Row {
                         TextButton(
                             onClick = {
-                                viewModel.navigateTo(Screen.Dashboard)
+                                viewModel.exitEditorWithoutSaving()
                                 showCloseConfirmDialog = false
                             },
                             colors = ButtonDefaults.textButtonColors(contentColor = Color.Red)

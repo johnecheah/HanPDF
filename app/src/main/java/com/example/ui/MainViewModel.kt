@@ -106,6 +106,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         
         // Seed default template if DB is empty to make onboarding magnificent!
         seedDemoData()
+
+        viewModelScope.launch {
+            kotlinx.coroutines.delay(1500)
+            cleanUnsavedTemporaryFiles()
+        }
     }
 
     private fun seedDemoData() {
@@ -127,7 +132,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // --- NAVIGATION API ---
     fun navigateTo(screen: Screen) {
-        _uiState.update { it.copy(currentScreen = screen) }
+        _uiState.update { state ->
+            if (screen == Screen.Dashboard) {
+                state.copy(
+                    currentScreen = screen,
+                    scannerStepBitmaps = emptyList(),
+                    scannerStepPaths = emptyList(),
+                    scannerIdFrontPath = null,
+                    scannerIdBackPath = null,
+                    idCardFrontBitmap = null,
+                    idCardBackBitmap = null,
+                    mergerSelectedDocs = emptyList()
+                )
+            } else {
+                state.copy(currentScreen = screen)
+            }
+        }
+        if (screen == Screen.Dashboard) {
+            cleanUnsavedTemporaryFiles()
+        }
     }
 
     fun dismissFeedback() {
@@ -324,11 +347,52 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             repo.deleteDocument(doc)
             // Clean up files
             try {
-                val file = File(doc.fileUri)
-                if (file.exists()) file.delete()
+                // 1. Delete physical file at doc.fileUri
+                if (doc.fileUri.isNotBlank()) {
+                    val file = File(doc.fileUri)
+                    if (file.exists()) file.delete()
+                }
             } catch (e: Exception) {
-                Log.e(TAG, "Failed deleting phys file", e)
+                Log.e(TAG, "Failed deleting phys file: ${doc.fileUri}", e)
             }
+
+            try {
+                // 2. Delete generated/stored PDF matching title & ID
+                val context = getApplication<Application>()
+                val docsDir = File(context.filesDir, "documents")
+                val pdfFile = File(docsDir, "${doc.title.replace(" ", "_")}_${doc.id}.pdf")
+                if (pdfFile.exists()) pdfFile.delete()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed deleting matched docsDir PDF", e)
+            }
+
+            try {
+                // 3. Delete pages' scanned backgrounds, collage elements or images
+                val content = DocumentSerializer.fromJson(doc.contentJson)
+                for (page in content.pages) {
+                    page.backgroundScanPath?.let { path ->
+                        if (path.isNotBlank()) {
+                            val f = File(path)
+                            if (f.exists()) f.delete()
+                        }
+                    }
+                    page.collageTop?.imagePath?.let { path ->
+                        if (path.isNotBlank()) {
+                            val f = File(path)
+                            if (f.exists()) f.delete()
+                        }
+                    }
+                    page.collageBottom?.imagePath?.let { path ->
+                        if (path.isNotBlank()) {
+                            val f = File(path)
+                            if (f.exists()) f.delete()
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed deleting document page assets", e)
+            }
+
             triggerFeedback("Document deleted successfully.")
         }
     }
@@ -434,6 +498,63 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 ) 
             }
             triggerFeedback("Changes flattened & PDF compiled!")
+        }
+    }
+
+    fun exitEditorWithoutSaving() {
+        val activeDoc = _uiState.value.activeDocument ?: run {
+            navigateTo(Screen.Dashboard)
+            return
+        }
+        val currentContent = _uiState.value.activeDocumentContent
+        viewModelScope.launch {
+            if (!activeDoc.isSaved) {
+                // This was a draft/newly imported document, so delete completely!
+                deleteDocument(activeDoc)
+            } else {
+                // Existing document, discard newly added page assets during this session
+                try {
+                    val dbDoc = repo.getDocumentById(activeDoc.id)
+                    if (dbDoc != null) {
+                        val dbContent = DocumentSerializer.fromJson(dbDoc.contentJson)
+                        val dbPageIds = dbContent.pages.map { it.id }.toSet()
+                        
+                        // Find any page in active session that was not in the database
+                        for (page in currentContent.pages) {
+                            if (!dbPageIds.contains(page.id)) {
+                                page.backgroundScanPath?.let { path ->
+                                    if (path.isNotBlank()) {
+                                        val f = File(path)
+                                        if (f.exists()) f.delete()
+                                    }
+                                }
+                                page.collageTop?.imagePath?.let { path ->
+                                    if (path.isNotBlank()) {
+                                        val f = File(path)
+                                        if (f.exists()) f.delete()
+                                    }
+                                }
+                                page.collageBottom?.imagePath?.let { path ->
+                                    if (path.isNotBlank()) {
+                                        val f = File(path)
+                                        if (f.exists()) f.delete()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed cleaning discarded session assets", e)
+                }
+            }
+            _uiState.update {
+                it.copy(
+                    activeDocument = null,
+                    activeDocumentContent = DocumentContent(),
+                    activePageId = ""
+                )
+            }
+            navigateTo(Screen.Dashboard)
         }
     }
 
@@ -1410,6 +1531,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteSignatureProfile(sig: SignatureProfile) {
         viewModelScope.launch {
             repo.deleteSignature(sig)
+            if (sig.pathDataJson.startsWith("image:")) {
+                try {
+                    val path = sig.pathDataJson.substringAfter("image:")
+                    if (path.isNotBlank()) {
+                        val f = File(path)
+                        if (f.exists()) f.delete()
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed deleting signature image file", e)
+                }
+            }
             triggerFeedback("Signature deleted.")
         }
     }
@@ -1419,6 +1551,112 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val updated = sig.copy(alias = newAlias)
             repo.insertSignature(updated)
             triggerFeedback("Signature profile renamed safely!")
+        }
+    }
+
+    fun cleanUnsavedTemporaryFiles() {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val context = getApplication<Application>()
+                val scansDir = File(context.filesDir, "scans")
+                val importedDir = File(context.filesDir, "imported")
+                val filesDir = context.filesDir
+
+                // Retrieve all documents and signatures synchronously from DB
+                val allDocs = repo.getDocumentsSync()
+                val allSigs = repo.getSignaturesSync()
+
+                val keepPaths = mutableSetOf<String>()
+
+                // Keep paths for saved documents
+                allDocs.forEach { doc ->
+                    if (doc.isSaved) {
+                        if (doc.fileUri.isNotBlank()) {
+                            keepPaths.add(File(doc.fileUri).absolutePath)
+                        }
+                        try {
+                            val content = DocumentSerializer.fromJson(doc.contentJson)
+                            content.pages.forEach { page ->
+                                page.backgroundScanPath?.let { if (it.isNotBlank()) keepPaths.add(File(it).absolutePath) }
+                                page.collageTop?.imagePath?.let { if (it.isNotBlank()) keepPaths.add(File(it).absolutePath) }
+                                page.collageBottom?.imagePath?.let { if (it.isNotBlank()) keepPaths.add(File(it).absolutePath) }
+                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error parsing saved doc content: ${doc.id}", e)
+                        }
+                    } else {
+                        // Delete unsaved doc physically
+                        if (doc.fileUri.isNotBlank()) {
+                            val file = File(doc.fileUri)
+                            if (file.exists()) file.delete()
+                        }
+                        try {
+                            val content = DocumentSerializer.fromJson(doc.contentJson)
+                            content.pages.forEach { page ->
+                                page.backgroundScanPath?.let { if (it.isNotBlank()) File(it).apply { if (exists()) delete() } }
+                                page.collageTop?.imagePath?.let { if (it.isNotBlank()) File(it).apply { if (exists()) delete() } }
+                                page.collageBottom?.imagePath?.let { if (it.isNotBlank()) File(it).apply { if (exists()) delete() } }
+                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error deleting unsaved doc files: ${doc.id}", e)
+                        }
+                        // Delete from database
+                        repo.deleteDocument(doc)
+                    }
+                }
+
+                // Keep paths for signatures in database
+                allSigs.forEach { sig ->
+                    if (sig.pathDataJson.startsWith("image:")) {
+                        val path = sig.pathDataJson.substringAfter("image:")
+                        if (path.isNotBlank()) {
+                            keepPaths.add(File(path).absolutePath)
+                        }
+                    }
+                }
+
+                // If currently editing a doc in UI, also keep its paths (just in case)
+                _uiState.value.activeDocument?.let { doc ->
+                    if (doc.fileUri.isNotBlank()) {
+                        keepPaths.add(File(doc.fileUri).absolutePath)
+                    }
+                }
+                _uiState.value.activeDocumentContent.pages.forEach { page ->
+                    page.backgroundScanPath?.let { if (it.isNotBlank()) keepPaths.add(File(it).absolutePath) }
+                    page.collageTop?.imagePath?.let { if (it.isNotBlank()) keepPaths.add(File(it).absolutePath) }
+                    page.collageBottom?.imagePath?.let { if (it.isNotBlank()) keepPaths.add(File(it).absolutePath) }
+                }
+
+                // Now clean scans directory
+                if (scansDir.exists() && scansDir.isDirectory) {
+                    scansDir.listFiles()?.forEach { file ->
+                        if (!keepPaths.contains(file.absolutePath)) {
+                            file.delete()
+                        }
+                    }
+                }
+
+                // Clean imported directory
+                if (importedDir.exists() && importedDir.isDirectory) {
+                    importedDir.listFiles()?.forEach { file ->
+                        if (!keepPaths.contains(file.absolutePath)) {
+                            file.delete()
+                        }
+                    }
+                }
+
+                // Clean loose signature PNGs in filesDir
+                filesDir.listFiles()?.forEach { file ->
+                    if (file.name.startsWith("signature_img_") && file.name.endsWith(".png")) {
+                        if (!keepPaths.contains(file.absolutePath)) {
+                            file.delete()
+                        }
+                    }
+                }
+
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed in cleanUnsavedTemporaryFiles", e)
+            }
         }
     }
 
@@ -1505,8 +1743,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun renameDocument(doc: Document, newTitle: String) {
         viewModelScope.launch {
-            if (newTitle.isNotBlank()) {
-                val updated = doc.copy(title = newTitle.trim())
+            val trimmedNewTitle = newTitle.trim()
+            if (trimmedNewTitle.isNotBlank()) {
+                val updated = doc.copy(title = trimmedNewTitle)
+                try {
+                    val context = getApplication<Application>()
+                    val docsDir = File(context.filesDir, "documents")
+                    if (!docsDir.exists()) docsDir.mkdirs()
+
+                    val oldFile = File(docsDir, "${doc.title.replace(" ", "_")}_${doc.id}.pdf")
+                    val newFile = File(docsDir, "${trimmedNewTitle.replace(" ", "_")}_${doc.id}.pdf")
+
+                    if (oldFile.exists()) {
+                        oldFile.renameTo(newFile)
+                    } else {
+                        // If it doesn't exist yet, we generate and save it directly
+                        val docContent = DocumentSerializer.fromJson(doc.contentJson)
+                        PdfGenerator.buildPdf(context, updated, docContent, _uiState.value.signatures)
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+
                 repo.updateDocument(updated)
                 triggerFeedback("Document renamed successfully!")
             }
