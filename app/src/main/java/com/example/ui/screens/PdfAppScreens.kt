@@ -1737,7 +1737,7 @@ fun SignatureStudioScreen(
             }
             val uri = androidx.core.content.FileProvider.getUriForFile(
                 context,
-                "com.example.fileprovider",
+                "${context.packageName}.fileprovider",
                 tempFile
             )
             tempCameraUri = uri
@@ -10673,7 +10673,7 @@ fun saveBitmapToCacheUri(context: android.content.Context, bitmap: Bitmap): andr
     outputStream.close()
     return androidx.core.content.FileProvider.getUriForFile(
         context,
-        "com.example.fileprovider",
+        "${context.packageName}.fileprovider",
         tempFile
     )
 }
@@ -10762,7 +10762,7 @@ fun sharePdfFile(context: android.content.Context, document: com.example.data.Do
         }
         val fileUri: android.net.Uri = androidx.core.content.FileProvider.getUriForFile(
             context,
-            "com.example.fileprovider",
+            "${context.packageName}.fileprovider",
             file
         )
         val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
@@ -12000,7 +12000,8 @@ fun CropImageStudioDialog(
                             contentAlignment = Alignment.Center
                         ) {
                             Canvas(modifier = Modifier.fillMaxSize()) {
-                                if (bitmap != null) {
+                                val safeBitmap = bitmap
+                                if (safeBitmap != null) {
                                     drawIntoCanvas { canvas ->
                                         val nativeBmpCanvas = canvas.nativeCanvas
                                         nativeBmpCanvas.save()
@@ -12012,11 +12013,11 @@ fun CropImageStudioDialog(
                                         nativeBmpCanvas.scale(scale, scale)
                                         nativeBmpCanvas.rotate(rotationAngle)
                                         
-                                        val bmpW = bitmap!!.width.toFloat()
-                                        val bmpH = bitmap!!.height.toFloat()
+                                        val bmpW = safeBitmap.width.toFloat()
+                                        val bmpH = safeBitmap.height.toFloat()
                                         
                                         nativeBmpCanvas.drawBitmap(
-                                            bitmap!!,
+                                            safeBitmap,
                                             -bmpW / 2f,
                                             -bmpH / 2f,
                                             AndroidPaint().apply {
