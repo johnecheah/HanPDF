@@ -416,6 +416,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             triggerFeedback("Document deleted successfully.")
+            cleanUnsavedTemporaryFiles()
         }
     }
 
@@ -1329,7 +1330,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             input = ParcelFileDescriptor.open(pdfFile, ParcelFileDescriptor.MODE_READ_ONLY)
             renderer = PdfRenderer(input)
             val count = renderer.pageCount
-            val appDir = context.filesDir
+            val appDir = context.cacheDir
             val documentsDir = File(appDir, "imported")
             if (!documentsDir.exists()) documentsDir.mkdirs()
 
@@ -1447,7 +1448,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val currentContent = _uiState.value.activeDocumentContent
                 val sizePage = currentContent.pages.size
                 
-                val appDir = getApplication<Application>().filesDir
+                val appDir = getApplication<Application>().cacheDir
                 val documentsDir = File(appDir, "imported")
                 if (!documentsDir.exists()) documentsDir.mkdirs()
 
@@ -1668,17 +1669,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             try {
                 val context = getApplication<Application>()
-                val scansDir = File(context.filesDir, "scans")
-                val importedDir = File(context.filesDir, "imported")
                 val filesDir = context.filesDir
+                val cacheDir = context.cacheDir
 
-                // Retrieve all documents and signatures synchronously from DB
-                val allDocs = repo.getDocumentsSync()
-                val allSigs = repo.getSignaturesSync()
+                // Retrieve all documents and signatures synchronously from DB to keep saved files
+                val allDocs = try { repo.getDocumentsSync() } catch (e: Exception) { emptyList() }
+                val allSigs = try { repo.getSignaturesSync() } catch (e: Exception) { emptyList() }
 
                 val keepPaths = mutableSetOf<String>()
 
-                // Pass 1: Keep paths for saved documents
                 allDocs.forEach { doc ->
                     if (doc.isSaved) {
                         if (doc.fileUri.isNotBlank()) {
@@ -1697,7 +1696,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
 
-                // Keep paths for signatures in database
                 allSigs.forEach { sig ->
                     if (sig.pathDataJson.startsWith("image:")) {
                         val path = sig.pathDataJson.substringAfter("image:")
@@ -1707,7 +1705,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
 
-                // If currently editing a doc in UI, also keep its paths
                 val activeDocId = _uiState.value.activeDocument?.id
                 _uiState.value.activeDocument?.let { doc ->
                     if (doc.fileUri.isNotBlank()) {
@@ -1721,58 +1718,65 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 val now = System.currentTimeMillis()
-                val minAgeMs = 10 * 60 * 1000L // Protect files created/modified in the last 10 minutes
-
-                // Pass 2: Safely remove unsaved documents that are NOT active in UI AND created > 10 min ago
+                val minAgeMs = 10 * 60 * 1000L
                 allDocs.forEach { doc ->
                     if (!doc.isSaved && doc.id != activeDocId && (now - doc.timestamp > minAgeMs)) {
-                        if (doc.fileUri.isNotBlank()) {
-                            val file = File(doc.fileUri)
-                            if (file.exists() && !keepPaths.contains(file.absolutePath)) file.delete()
-                        }
-                        try {
-                            val content = DocumentSerializer.fromJson(doc.contentJson)
-                            content.pages.forEach { page ->
-                                page.backgroundScanPath?.let { if (it.isNotBlank()) { val f = File(it); if (f.exists() && !keepPaths.contains(f.absolutePath)) f.delete() } }
-                                page.collageTop?.imagePath?.let { if (it.isNotBlank()) { val f = File(it); if (f.exists() && !keepPaths.contains(f.absolutePath)) f.delete() } }
-                                page.collageBottom?.imagePath?.let { if (it.isNotBlank()) { val f = File(it); if (f.exists() && !keepPaths.contains(f.absolutePath)) f.delete() } }
-                            }
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Error deleting unsaved doc files: ${doc.id}", e)
-                        }
                         repo.deleteDocument(doc)
                     }
                 }
 
-                // Clean scans directory safely
-                if (scansDir.exists() && scansDir.isDirectory) {
-                    scansDir.listFiles()?.forEach { file ->
-                        if (!keepPaths.contains(file.absolutePath) && (now - file.lastModified() > minAgeMs)) {
-                            file.delete()
+                // 1. Clean main temporary directories
+                val tempDirs = listOf(
+                    File(filesDir, "documents"),
+                    File(filesDir, "imported"),
+                    File(filesDir, "scans"),
+                    File(filesDir, "signatures"),
+                    File(filesDir, "temp"),
+                    File(cacheDir, "documents"),
+                    File(cacheDir, "imported"),
+                    File(cacheDir, "scans"),
+                    File(cacheDir, "signatures"),
+                    File(cacheDir, "temp")
+                )
+
+                tempDirs.forEach { dir ->
+                    if (dir.exists()) {
+                        dir.listFiles()?.forEach { file ->
+                            if (shouldDeleteFile(file, keepPaths)) {
+                                file.delete()
+                            }
+                        }
+                        if (dir.listFiles()?.isEmpty() == true) {
+                            dir.delete()
                         }
                     }
                 }
 
-                // Clean imported directory safely
-                if (importedDir.exists() && importedDir.isDirectory) {
-                    importedDir.listFiles()?.forEach { file ->
-                        if (!keepPaths.contains(file.absolutePath) && (now - file.lastModified() > minAgeMs)) {
-                            file.delete()
-                        }
-                    }
-                }
+                // 2. Clean old bitmap caches and unused files older than 2 hours
+                cleanOldFilesOlderThan(filesDir, 2, keepPaths)
+                cleanOldFilesOlderThan(cacheDir, 2, keepPaths)
 
-                // Clean loose signature PNGs in filesDir
-                filesDir.listFiles()?.forEach { file ->
-                    if (file.name.startsWith("signature_img_") && file.name.endsWith(".png")) {
-                        if (!keepPaths.contains(file.absolutePath) && (now - file.lastModified() > minAgeMs)) {
-                            file.delete()
-                        }
-                    }
-                }
-
+                Log.d(TAG, "Temporary files cleanup completed.")
             } catch (e: Exception) {
-                Log.e(TAG, "Failed in cleanUnsavedTemporaryFiles", e)
+                Log.e(TAG, "Cleanup failed", e)
+            }
+        }
+    }
+
+    private fun shouldDeleteFile(file: File, keepPaths: Set<String> = emptySet()): Boolean {
+        if (file.isDirectory) return false
+        if (file.name.contains("saved_") || file.name.startsWith("final_")) return false
+        if (keepPaths.contains(file.absolutePath)) return false
+        return true
+    }
+
+    private fun cleanOldFilesOlderThan(dir: File, hours: Int, keepPaths: Set<String> = emptySet()) {
+        val cutoff = System.currentTimeMillis() - (hours * 60 * 60 * 1000L)
+        dir.walkTopDown().forEach { file ->
+            if (file.isFile && file.lastModified() < cutoff) {
+                if (!keepPaths.contains(file.absolutePath) && !file.name.contains("saved_") && !file.name.startsWith("final_")) {
+                    file.delete()
+                }
             }
         }
     }
@@ -2063,7 +2067,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 return@launch
             }
 
-            val scansDir = File(getApplication<Application>().filesDir, "scans")
+            val scansDir = File(getApplication<Application>().cacheDir, "scans")
             if (!scansDir.exists()) scansDir.mkdirs()
 
             // Apply filter to front and back bitmaps before scaling/cropping or drawing
@@ -2161,7 +2165,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val contentResolver = getApplication<Application>().contentResolver
                 val loadedBitmaps = mutableListOf<Bitmap>()
                 val loadedPaths = mutableListOf<String>()
-                val scansDir = File(getApplication<Application>().filesDir, "scans")
+                val scansDir = File(getApplication<Application>().cacheDir, "scans")
                 if (!scansDir.exists()) scansDir.mkdirs()
 
                 uris.forEach { uri ->
@@ -2200,7 +2204,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val contentResolver = getApplication<Application>().contentResolver
                 val loadedBitmaps = mutableListOf<Bitmap>()
                 val loadedPaths = mutableListOf<String>()
-                val scansDir = File(getApplication<Application>().filesDir, "scans")
+                val scansDir = File(getApplication<Application>().cacheDir, "scans")
                 if (!scansDir.exists()) scansDir.mkdirs()
 
                 uris.forEachIndexed { index, uri ->
@@ -2282,7 +2286,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val deskewed = DocumentProcessor.deskew(bitmap, corners)
             val processedBitmap = DocumentProcessor.flattenCurvesAndEnhance(deskewed)
  
-            val scansDir = File(getApplication<Application>().filesDir, "scans")
+            val scansDir = File(getApplication<Application>().cacheDir, "scans")
             if (!scansDir.exists()) scansDir.mkdirs()
  
             // Save processed scan file
@@ -2334,7 +2338,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val croppedBmp = Bitmap.createBitmap(originalBitmap, x, y, croppedWidth, croppedHeight)
                 
                 // Save cropped scan file
-                val scansDir = File(getApplication<Application>().filesDir, "scans")
+                val scansDir = File(getApplication<Application>().cacheDir, "scans")
                 if (!scansDir.exists()) scansDir.mkdirs()
                 val file = File(scansDir, "scan_cropped_${System.currentTimeMillis()}.jpg")
                 val fos = FileOutputStream(file)
@@ -2364,7 +2368,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun createDocumentFromLocalFile(title: String, fileExtension: String, fileBytes: ByteArray) {
         viewModelScope.launch {
             try {
-                val appDir = getApplication<Application>().filesDir
+                val appDir = getApplication<Application>().cacheDir
                 val documentsDir = File(appDir, "imported")
                 if (!documentsDir.exists()) documentsDir.mkdirs()
                 
@@ -2479,7 +2483,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             
             val actualTitle = masterTitle.ifBlank { "Combined Document - ${System.currentTimeMillis() % 1000}" }
-            val appDir = getApplication<Application>().filesDir
+            val appDir = getApplication<Application>().cacheDir
             val scansDir = File(appDir, "scans")
             if (!scansDir.exists()) scansDir.mkdirs()
             
@@ -2572,7 +2576,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun saveIdentityCardFrontBack(front: Bitmap, back: Bitmap) {
         viewModelScope.launch {
-            val scansDir = File(getApplication<Application>().filesDir, "scans")
+            val scansDir = File(getApplication<Application>().cacheDir, "scans")
             if (!scansDir.exists()) scansDir.mkdirs()
 
             // Step 1 & 2: Crop both ID card side views to 86mm x 54mm proportions (1.5926f)
@@ -2673,7 +2677,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 return@launch
             }
 
-            val appDir = getApplication<Application>().filesDir
+            val appDir = getApplication<Application>().cacheDir
             val scansDir = File(appDir, "scans")
             if (!scansDir.exists()) scansDir.mkdirs()
 
@@ -3066,7 +3070,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val finalPages = mutableListOf<PageDef>()
                 var pageCounter = 1
-                val scansDir = File(getApplication<Application>().filesDir, "scans")
+                val scansDir = File(getApplication<Application>().cacheDir, "scans")
                 if (!scansDir.exists()) scansDir.mkdirs()
 
                 for (doc in docs) {
@@ -3206,7 +3210,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun importMultipleLocalFilesForMerging(context: android.content.Context, uris: List<android.net.Uri>) {
         viewModelScope.launch {
             try {
-                val appDir = getApplication<Application>().filesDir
+                val appDir = getApplication<Application>().cacheDir
                 val documentsDir = File(appDir, "imported")
                 if (!documentsDir.exists()) documentsDir.mkdirs()
 
@@ -3340,7 +3344,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     ) {
         viewModelScope.launch {
             try {
-                val appDir = getApplication<Application>().filesDir
+                val appDir = getApplication<Application>().cacheDir
                 val documentsDir = File(appDir, "imported")
                 if (!documentsDir.exists()) documentsDir.mkdirs()
 
@@ -3459,5 +3463,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 triggerFeedback("Import error: ${e.localizedMessage}")
             }
         }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        cleanUnsavedTemporaryFiles()
     }
 }
