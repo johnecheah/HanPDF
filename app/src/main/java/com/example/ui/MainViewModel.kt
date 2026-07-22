@@ -98,12 +98,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun observeData() {
         viewModelScope.launch {
             repo.allDocuments.collect { docs ->
-                _uiState.update { it.copy(documents = docs) }
+                _uiState.update { it.copy(documents = docs.filter { d -> d.isSaved }) }
             }
         }
         viewModelScope.launch {
             repo.starredDocuments.collect { starred ->
-                _uiState.update { it.copy(starredDocuments = starred) }
+                _uiState.update { it.copy(starredDocuments = starred.filter { d -> d.isSaved }) }
             }
         }
         viewModelScope.launch {
@@ -329,7 +329,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 },
                 pageCount = 1,
                 contentJson = json,
-                isSaved = true
+                isSaved = false
             )
             
             val docId = repo.insertDocument(newDoc).toInt()
@@ -2451,7 +2451,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     category = if (isImage) "Photo import" else "PDF import",
                     pageCount = initialPages.size,
                     contentJson = json,
-                    isSaved = true
+                    isSaved = false
                 )
                 
                 val docId = repo.insertDocument(newDoc).toInt()
@@ -3305,7 +3305,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         category = if (isImage) "Photo import" else "PDF import",
                         pageCount = initialPages.size,
                         contentJson = json,
-                        isSaved = true
+                        isSaved = false
                     )
 
                     val docId = repo.insertDocument(newDoc).toInt()
@@ -3439,7 +3439,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         category = if (isImage) "Photo import" else "PDF import",
                         pageCount = initialPages.size,
                         contentJson = json,
-                        isSaved = true
+                        isSaved = false
                     )
 
                     val docId = repo.insertDocument(newDoc).toInt()
