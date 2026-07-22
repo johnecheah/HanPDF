@@ -7,11 +7,11 @@ plugins {
 }
 
 android {
-  namespace = "com.example"
+  namespace = "com.johnecheah.hanpdf"
   compileSdk = 36
 
   defaultConfig {
-    applicationId = "com.aistudio.acropdf.scanner.fhmxqy"
+    applicationId = "com.johnecheah.hanpdf"
     minSdk = 24
     targetSdk = 36
     versionCode = 4

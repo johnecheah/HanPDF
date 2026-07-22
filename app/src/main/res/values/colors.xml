@@ -7,7 +7,15 @@
     <color name="teal_700">#FF018786</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+
+    <!-- Brand Colors -->
     <color name="BentoBlue">#0A84FF</color>
+    <color name="BentoDarkBlue">#1E3A8A</color>
     <color name="AdobeSecondary">#FA0000</color>
-    <color name="DarkBackground">#121212</color>
+    <color name="AdobeAccentCyan">#00E5D8</color>
+    <color name="DarkBackground">#0F172A</color>
+    <color name="DarkSurface">#1E2937</color>
+    <color name="DarkOnSurface">#E2E8F0</color>
+    <color name="BentoBg">#F8FAFC</color>
+    <color name="BentoSurface">#FFFFFF</color>
 </resources>

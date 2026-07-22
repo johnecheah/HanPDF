@@ -18,7 +18,7 @@ import retrofit2.http.POST
 import retrofit2.http.Query
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.TimeUnit
-import com.example.BuildConfig
+import com.johnecheah.hanpdf.BuildConfig
 
 // --- GEMINI API SCHEMAS ---
 
