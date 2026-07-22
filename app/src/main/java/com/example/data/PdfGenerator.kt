@@ -131,7 +131,7 @@ object PdfGenerator {
                 }
 
                 // 2. Draw standard templates if scan background is missing
-                if (pageDef.backgroundScanPath != null) {
+                if (!pageDef.backgroundScanPath.isNullOrBlank() && File(pageDef.backgroundScanPath).exists()) {
                     val originalBmp = decodeAndScaleBackground(pageDef.backgroundScanPath, 2480)
                     if (originalBmp != null) {
                         val bitmap = if (pageDef.filterType != "original" || pageDef.brightness != 0f || pageDef.contrast != 1f || pageDef.saturation != 1f || pageDef.shade != 0f) {
@@ -450,8 +450,11 @@ object PdfGenerator {
     }
 
     private fun drawCollageItem(canvas: Canvas, item: CollageItemDef, isTop: Boolean, curW: Int, curH: Int, pageDef: PageDef) {
+        val path = item.imagePath.removePrefix("file://")
+        if (path.isBlank() || !File(path).exists()) return
+
         val bmp = try {
-            val originalBmp = BitmapFactory.decodeFile(item.imagePath)
+            val originalBmp = BitmapFactory.decodeFile(path)
             if (originalBmp != null && (pageDef.filterType != "original" || pageDef.brightness != 0f || pageDef.contrast != 1f || pageDef.saturation != 1f || pageDef.shade != 0f)) {
                 val filtered = BitmapFilter.applyFilter(originalBmp, pageDef.filterType, pageDef.brightness, pageDef.contrast, pageDef.saturation, pageDef.shade)
                 if (filtered != originalBmp) {

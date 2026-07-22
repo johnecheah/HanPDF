@@ -995,7 +995,7 @@ fun DashboardScreen(
                         Spacer(modifier = Modifier.height(18.dp))
                         
                         Text(
-                            text = "Created by\nJohne Cheah\n@2026\n \nVersion V2.4",
+                            text = "Created by\nJohne Cheah\n@2026\n \nVersion V2.5",
                             fontSize = 15.sp,
                             lineHeight = 22.sp,
                             fontWeight = FontWeight.Bold,
@@ -5369,9 +5369,10 @@ fun ScanEditScreen(
                         // Quick Share
                         IconButton(
                             onClick = {
-                                viewModel.saveEditorChanges()
-                                sharePdfFile(context, activeDoc)
-                                viewModel.navigateTo(Screen.Dashboard)
+                                viewModel.saveEditorChanges {
+                                    sharePdfFile(context, activeDoc)
+                                    viewModel.navigateTo(Screen.Dashboard)
+                                }
                             }
                         ) {
                             Icon(Icons.Default.Share, "Share PDF", tint = MaterialTheme.colorScheme.primary)
@@ -5380,8 +5381,9 @@ fun ScanEditScreen(
                         // Save & Close
                         Button(
                             onClick = {
-                                viewModel.saveEditorChanges()
-                                viewModel.navigateTo(Screen.Dashboard)
+                                viewModel.saveEditorChanges {
+                                    viewModel.navigateTo(Screen.Dashboard)
+                                }
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                             shape = RoundedCornerShape(8.dp),
@@ -9446,9 +9448,10 @@ fun ScanEditScreen(
                 confirmButton = {
                     TextButton(
                         onClick = {
-                            viewModel.saveEditorChanges()
-                            viewModel.navigateTo(Screen.Dashboard)
-                            showCloseConfirmDialog = false
+                            viewModel.saveEditorChanges {
+                                viewModel.navigateTo(Screen.Dashboard)
+                                showCloseConfirmDialog = false
+                            }
                         }
                     ) {
                         Text("Save and Exit", fontWeight = FontWeight.Bold)

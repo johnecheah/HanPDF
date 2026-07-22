@@ -17,18 +17,20 @@ import java.io.FileOutputStream
 import java.io.InputStream
 import java.util.UUID
 
+// ====================== SCREENS ======================
 sealed class Screen {
-    object Dashboard : Screen()
-    object ScanCamera : Screen()
-    object ScanEdit : Screen()
-    object PdfMerger : Screen()
-    object OcrViewer : Screen()
-    object IdScanCamera : Screen()
-    object IdScanEdit : Screen()
-    object Editor : Screen()
-    object SignatureStudio : Screen()
+    data object Dashboard : Screen()
+    data object ScanCamera : Screen()
+    data object ScanEdit : Screen()
+    data object PdfMerger : Screen()
+    data object OcrViewer : Screen()
+    data object IdScanCamera : Screen()
+    data object IdScanEdit : Screen()
+    data object Editor : Screen()
+    data object SignatureStudio : Screen()
 }
 
+// ====================== UI STATE ======================
 data class UiState(
     val currentScreen: Screen = Screen.Dashboard,
     val documents: List<Document> = emptyList(),
@@ -69,6 +71,7 @@ data class UiState(
     val feedbackMessage: String? = null
 )
 
+// ====================== MAIN VIEW MODEL ======================
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val TAG = "MainViewModel"
     private val db = AppDatabase.getDatabase(application)
@@ -87,7 +90,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
 
     init {
-        // Collect documents and signatures reactively from SQLite
+        observeData()
+        seedDemoDataIfNeeded()
+        cleanTemporaryFilesDelayed()
+    }
+
+    private fun observeData() {
         viewModelScope.launch {
             repo.allDocuments.collect { docs ->
                 _uiState.update { it.copy(documents = docs) }
@@ -103,20 +111,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _uiState.update { it.copy(signatures = sigs) }
             }
         }
-        
-        // Seed default template if DB is empty to make onboarding magnificent!
-        seedDemoData()
-
-        viewModelScope.launch {
-            kotlinx.coroutines.delay(1500)
-            cleanUnsavedTemporaryFiles()
-        }
     }
 
-    private fun seedDemoData() {
+    private fun seedDemoDataIfNeeded() {
         viewModelScope.launch {
             repo.allDocuments.first().let { currentList ->
-                // Clean up any previously seeded AcroPDF Welcome Guide
+                // Clean up any previously seeded AcroPDF Welcome Guide if needed
                 currentList.forEach { doc ->
                     if (doc.title == "AcroPDF Welcome Guide") {
                         try {
@@ -127,6 +127,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
             }
+        }
+    }
+
+    private fun cleanTemporaryFilesDelayed() {
+        viewModelScope.launch {
+            kotlinx.coroutines.delay(1500)
+            cleanUnsavedTemporaryFiles()
         }
     }
 
@@ -322,7 +329,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 },
                 pageCount = 1,
                 contentJson = json,
-                isSaved = false
+                isSaved = true
             )
             
             val docId = repo.insertDocument(newDoc).toInt()
@@ -345,47 +352,62 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteDocument(doc: Document) {
         viewModelScope.launch {
             repo.deleteDocument(doc)
-            // Clean up files
+
+            // Gather paths of all remaining saved documents to prevent deleting shared files
+            val allDocs = try { repo.getDocumentsSync() } catch (e: Exception) { emptyList() }
+            val keepPaths = mutableSetOf<String>()
+            allDocs.forEach { other ->
+                if (other.id != doc.id && other.isSaved) {
+                    if (other.fileUri.isNotBlank()) keepPaths.add(File(other.fileUri).absolutePath)
+                    try {
+                        val c = DocumentSerializer.fromJson(other.contentJson)
+                        c.pages.forEach { p ->
+                            p.backgroundScanPath?.let { if (it.isNotBlank()) keepPaths.add(File(it).absolutePath) }
+                            p.collageTop?.imagePath?.let { if (it.isNotBlank()) keepPaths.add(File(it).absolutePath) }
+                            p.collageBottom?.imagePath?.let { if (it.isNotBlank()) keepPaths.add(File(it).absolutePath) }
+                        }
+                    } catch (e: Exception) {}
+                }
+            }
+
+            // Clean up files safely
             try {
-                // 1. Delete physical file at doc.fileUri
                 if (doc.fileUri.isNotBlank()) {
                     val file = File(doc.fileUri)
-                    if (file.exists()) file.delete()
+                    if (file.exists() && !keepPaths.contains(file.absolutePath)) file.delete()
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed deleting phys file: ${doc.fileUri}", e)
             }
 
             try {
-                // 2. Delete generated/stored PDF matching title & ID
                 val context = getApplication<Application>()
                 val docsDir = File(context.filesDir, "documents")
                 val pdfFile = File(docsDir, "${doc.title.replace(" ", "_")}_${doc.id}.pdf")
-                if (pdfFile.exists()) pdfFile.delete()
+                if (pdfFile.exists() && !keepPaths.contains(pdfFile.absolutePath)) pdfFile.delete()
             } catch (e: Exception) {
                 Log.e(TAG, "Failed deleting matched docsDir PDF", e)
             }
 
             try {
-                // 3. Delete pages' scanned backgrounds, collage elements or images
                 val content = DocumentSerializer.fromJson(doc.contentJson)
                 for (page in content.pages) {
                     page.backgroundScanPath?.let { path ->
                         if (path.isNotBlank()) {
                             val f = File(path)
-                            if (f.exists()) f.delete()
+                            if (f.exists() && !keepPaths.contains(f.absolutePath)) f.delete()
                         }
                     }
                     page.collageTop?.imagePath?.let { path ->
                         if (path.isNotBlank()) {
                             val f = File(path)
-                            if (f.exists()) f.delete()
+                            if (f.exists() && !keepPaths.contains(f.absolutePath)) f.delete()
                         }
                     }
                     page.collageBottom?.imagePath?.let { path ->
                         if (path.isNotBlank()) {
                             val f = File(path)
-                            if (f.exists()) f.delete()
+                            if (f.exists() && !keepPaths.contains(f.absolutePath)) f.delete()
                         }
                     }
                 }
@@ -462,42 +484,55 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun canUndo(): Boolean = undoStack.isNotEmpty()
     fun canRedo(): Boolean = redoStack.isNotEmpty()
 
-    fun saveEditorChanges() {
-        val activeDoc = _uiState.value.activeDocument ?: return
+    fun saveEditorChanges(onComplete: (() -> Unit)? = null) {
+        val activeDoc = _uiState.value.activeDocument ?: run {
+            onComplete?.invoke()
+            return
+        }
         var currentContent = _uiState.value.activeDocumentContent
         viewModelScope.launch {
-            // Merge signature and text annotation layers with the background scan / template image
-            currentContent = mergeLayersForSaving(currentContent)
+            try {
+                // Merge signature and text annotation layers with the background scan / template image
+                currentContent = mergeLayersForSaving(currentContent)
 
-            val json = DocumentSerializer.toJson(currentContent)
-            val updatedDoc = activeDoc.copy(
-                contentJson = json,
-                pageCount = currentContent.pages.size,
-                isSaved = true
-            )
-            
-            // Re-render genuine PDF
-            val file = PdfGenerator.buildPdf(
-                getApplication(),
-                updatedDoc,
-                currentContent,
-                _uiState.value.signatures
-            )
-            
-            val finalDoc = if (file != null) {
-                updatedDoc.copy(fileUri = file.absolutePath)
-            } else {
-                updatedDoc
-            }
+                val json = DocumentSerializer.toJson(currentContent)
+                val updatedDoc = activeDoc.copy(
+                    contentJson = json,
+                    pageCount = currentContent.pages.size,
+                    isSaved = true
+                )
 
-            repo.updateDocument(finalDoc)
-            _uiState.update { 
-                it.copy(
-                    activeDocument = finalDoc,
-                    activeDocumentContent = currentContent
-                ) 
+                // Persist updated document to database immediately so it's marked isSaved = true
+                repo.updateDocument(updatedDoc)
+
+                // Re-render genuine PDF
+                val file = PdfGenerator.buildPdf(
+                    getApplication(),
+                    updatedDoc,
+                    currentContent,
+                    _uiState.value.signatures
+                )
+
+                val finalDoc = if (file != null) {
+                    updatedDoc.copy(fileUri = file.absolutePath)
+                } else {
+                    updatedDoc
+                }
+
+                repo.updateDocument(finalDoc)
+                _uiState.update { 
+                    it.copy(
+                        activeDocument = finalDoc,
+                        activeDocumentContent = currentContent
+                    ) 
+                }
+                triggerFeedback("Changes saved & PDF compiled!")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error saving editor changes", e)
+                triggerFeedback("Failed to save changes: ${e.localizedMessage}")
+            } finally {
+                onComplete?.invoke()
             }
-            triggerFeedback("Changes flattened & PDF compiled!")
         }
     }
 
@@ -656,20 +691,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 // Draw backgroundScanPath if any
-                if (page.backgroundScanPath != null) {
-                    val file = File(page.backgroundScanPath)
-                    if (file.exists()) {
-                        val bitmap = decodeAndScaleBitmap(file.absolutePath, 2480)
-                        if (bitmap != null) {
-                            val rect = android.graphics.RectF(
-                                (finalW - curW) / 2f,
-                                (finalH - curH) / 2f,
-                                (finalW + curW) / 2f,
-                                (finalH + curH) / 2f
-                            )
-                            canvas.drawBitmap(bitmap, null, rect, android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG))
-                            bitmap.recycle()
-                        }
+                if (!page.backgroundScanPath.isNullOrBlank() && File(page.backgroundScanPath).exists()) {
+                    val bitmap = decodeAndScaleBitmap(page.backgroundScanPath, 2480)
+                    if (bitmap != null) {
+                        val rect = android.graphics.RectF(
+                            (finalW - curW) / 2f,
+                            (finalH - curH) / 2f,
+                            (finalW + curW) / 2f,
+                            (finalH + curH) / 2f
+                        )
+                        canvas.drawBitmap(bitmap, null, rect, android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG))
+                        bitmap.recycle()
                     }
                 } else {
                     // Draw templates
@@ -735,6 +767,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             // Bottom section content frame box
                             canvas.drawRect(curW * 0.08f, curH * 0.35f, curW * 0.92f, curH * 0.92f, thinPaint)
                             canvas.drawLine(curW * 0.08f, curH * 0.65f, curW * 0.92f, curH * 0.65f, thinPaint)
+                        }
+                        "collage" -> {
+                            page.collageTop?.let { item ->
+                                drawCollageItemToCanvas(canvas, item, isTop = true, curW = curW, curH = curH, pageDef = page)
+                            }
+                            page.collageBottom?.let { item ->
+                                drawCollageItemToCanvas(canvas, item, isTop = false, curW = curW, curH = curH, pageDef = page)
+                            }
                         }
                     }
                 }
@@ -941,6 +981,76 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         return DocumentContent(pages = updatedPages)
+    }
+
+    private fun drawCollageItemToCanvas(
+        canvas: android.graphics.Canvas,
+        item: com.example.data.CollageItemDef,
+        isTop: Boolean,
+        curW: Int,
+        curH: Int,
+        pageDef: com.example.data.PageDef
+    ) {
+        val path = item.imagePath.removePrefix("file://")
+        if (path.isBlank() || !File(path).exists()) return
+
+        val bmp = try {
+            val originalBmp = BitmapFactory.decodeFile(path)
+            if (originalBmp != null && (pageDef.filterType != "original" || pageDef.brightness != 0f || pageDef.contrast != 1f || pageDef.saturation != 1f || pageDef.shade != 0f)) {
+                val filtered = applyFilterToBitmap(originalBmp, pageDef.filterType, pageDef.brightness, pageDef.contrast, pageDef.saturation, pageDef.shade)
+                if (filtered != originalBmp) {
+                    originalBmp.recycle()
+                }
+                filtered
+            } else {
+                originalBmp
+            }
+        } catch (e: Exception) {
+            null
+        } ?: return
+
+        canvas.save()
+
+        val rectW = curW * 0.95f
+        val rectH = curH * 0.475f
+
+        val centerX = curW / 2f
+        val halfH = curH / 2f
+        val centerY = if (isTop) halfH / 2f else halfH + (halfH / 2f)
+
+        val left = centerX - rectW / 2f
+        val top = centerY - rectH / 2f
+        val right = centerX + rectW / 2f
+        val bottom = centerY + rectH / 2f
+
+        canvas.clipRect(left, top, right, bottom)
+
+        val imgW = bmp.width.toFloat()
+        val imgH = bmp.height.toFloat()
+        if (imgW > 0f && imgH > 0f) {
+            val scaleToFit = minOf(rectW / imgW, rectH / imgH)
+
+            val matrix = android.graphics.Matrix()
+            matrix.postTranslate(-imgW / 2f, -imgH / 2f)
+
+            val flipX = if (item.flipHorizontal) -1f else 1f
+            val flipY = if (item.flipVertical) -1f else 1f
+            matrix.postScale(flipX, flipY)
+
+            matrix.postRotate(item.rotation)
+
+            val totalScale = scaleToFit * item.scale
+            matrix.postScale(totalScale, totalScale)
+
+            val panX = item.offsetX * rectW
+            val panY = item.offsetY * rectH
+            matrix.postTranslate(centerX + panX, centerY + panY)
+
+            canvas.drawBitmap(bmp, matrix, android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG))
+        }
+
+        canvas.restore()
+        bmp.recycle()
     }
 
     fun setActivePageId(pageId: String) {
@@ -1568,7 +1678,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 val keepPaths = mutableSetOf<String>()
 
-                // Keep paths for saved documents
+                // Pass 1: Keep paths for saved documents
                 allDocs.forEach { doc ->
                     if (doc.isSaved) {
                         if (doc.fileUri.isNotBlank()) {
@@ -1584,24 +1694,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         } catch (e: Exception) {
                             Log.e(TAG, "Error parsing saved doc content: ${doc.id}", e)
                         }
-                    } else {
-                        // Delete unsaved doc physically
-                        if (doc.fileUri.isNotBlank()) {
-                            val file = File(doc.fileUri)
-                            if (file.exists()) file.delete()
-                        }
-                        try {
-                            val content = DocumentSerializer.fromJson(doc.contentJson)
-                            content.pages.forEach { page ->
-                                page.backgroundScanPath?.let { if (it.isNotBlank()) File(it).apply { if (exists()) delete() } }
-                                page.collageTop?.imagePath?.let { if (it.isNotBlank()) File(it).apply { if (exists()) delete() } }
-                                page.collageBottom?.imagePath?.let { if (it.isNotBlank()) File(it).apply { if (exists()) delete() } }
-                            }
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Error deleting unsaved doc files: ${doc.id}", e)
-                        }
-                        // Delete from database
-                        repo.deleteDocument(doc)
                     }
                 }
 
@@ -1615,7 +1707,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
 
-                // If currently editing a doc in UI, also keep its paths (just in case)
+                // If currently editing a doc in UI, also keep its paths
+                val activeDocId = _uiState.value.activeDocument?.id
                 _uiState.value.activeDocument?.let { doc ->
                     if (doc.fileUri.isNotBlank()) {
                         keepPaths.add(File(doc.fileUri).absolutePath)
@@ -1627,19 +1720,43 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     page.collageBottom?.imagePath?.let { if (it.isNotBlank()) keepPaths.add(File(it).absolutePath) }
                 }
 
-                // Now clean scans directory
+                val now = System.currentTimeMillis()
+                val minAgeMs = 10 * 60 * 1000L // Protect files created/modified in the last 10 minutes
+
+                // Pass 2: Safely remove unsaved documents that are NOT active in UI AND created > 10 min ago
+                allDocs.forEach { doc ->
+                    if (!doc.isSaved && doc.id != activeDocId && (now - doc.timestamp > minAgeMs)) {
+                        if (doc.fileUri.isNotBlank()) {
+                            val file = File(doc.fileUri)
+                            if (file.exists() && !keepPaths.contains(file.absolutePath)) file.delete()
+                        }
+                        try {
+                            val content = DocumentSerializer.fromJson(doc.contentJson)
+                            content.pages.forEach { page ->
+                                page.backgroundScanPath?.let { if (it.isNotBlank()) { val f = File(it); if (f.exists() && !keepPaths.contains(f.absolutePath)) f.delete() } }
+                                page.collageTop?.imagePath?.let { if (it.isNotBlank()) { val f = File(it); if (f.exists() && !keepPaths.contains(f.absolutePath)) f.delete() } }
+                                page.collageBottom?.imagePath?.let { if (it.isNotBlank()) { val f = File(it); if (f.exists() && !keepPaths.contains(f.absolutePath)) f.delete() } }
+                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error deleting unsaved doc files: ${doc.id}", e)
+                        }
+                        repo.deleteDocument(doc)
+                    }
+                }
+
+                // Clean scans directory safely
                 if (scansDir.exists() && scansDir.isDirectory) {
                     scansDir.listFiles()?.forEach { file ->
-                        if (!keepPaths.contains(file.absolutePath)) {
+                        if (!keepPaths.contains(file.absolutePath) && (now - file.lastModified() > minAgeMs)) {
                             file.delete()
                         }
                     }
                 }
 
-                // Clean imported directory
+                // Clean imported directory safely
                 if (importedDir.exists() && importedDir.isDirectory) {
                     importedDir.listFiles()?.forEach { file ->
-                        if (!keepPaths.contains(file.absolutePath)) {
+                        if (!keepPaths.contains(file.absolutePath) && (now - file.lastModified() > minAgeMs)) {
                             file.delete()
                         }
                     }
@@ -1648,7 +1765,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 // Clean loose signature PNGs in filesDir
                 filesDir.listFiles()?.forEach { file ->
                     if (file.name.startsWith("signature_img_") && file.name.endsWith(".png")) {
-                        if (!keepPaths.contains(file.absolutePath)) {
+                        if (!keepPaths.contains(file.absolutePath) && (now - file.lastModified() > minAgeMs)) {
                             file.delete()
                         }
                     }
@@ -2334,7 +2451,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     category = if (isImage) "Photo import" else "PDF import",
                     pageCount = initialPages.size,
                     contentJson = json,
-                    isSaved = false
+                    isSaved = true
                 )
                 
                 val docId = repo.insertDocument(newDoc).toInt()
@@ -2441,7 +2558,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val insertedDoc = repo.getDocumentById(docId)
             
             if (insertedDoc != null) {
-                PdfGenerator.buildPdf(getApplication(), insertedDoc, docContent, _uiState.value.signatures)
+                val pdfFile = PdfGenerator.buildPdf(getApplication(), insertedDoc, docContent, _uiState.value.signatures)
+                if (pdfFile != null) {
+                    repo.updateDocument(insertedDoc.copy(fileUri = pdfFile.absolutePath))
+                }
                 triggerFeedback("Combined $pageCount local files into one HanPDF master document!")
                 navigateTo(Screen.Dashboard)
             } else {
@@ -2946,17 +3066,101 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val finalPages = mutableListOf<PageDef>()
                 var pageCounter = 1
+                val scansDir = File(getApplication<Application>().filesDir, "scans")
+                if (!scansDir.exists()) scansDir.mkdirs()
 
                 for (doc in docs) {
-                    val content = DocumentSerializer.fromJson(doc.contentJson)
-                    for (page in content.pages) {
+                    var pagesFromDoc = emptyList<PageDef>()
+                    try {
+                        val content = DocumentSerializer.fromJson(doc.contentJson)
+                        pagesFromDoc = content.pages
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error parsing json for doc ${doc.id}", e)
+                    }
+
+                    // Fallback if contentJson has 0 pages but doc has a valid fileUri
+                    if (pagesFromDoc.isEmpty() && doc.fileUri.isNotBlank() && File(doc.fileUri).exists()) {
+                        val sourceFile = File(doc.fileUri)
+                        val ext = sourceFile.extension.lowercase()
+                        if (ext == "pdf") {
+                            val extractedPaths = extractPdfPagesToImages(getApplication(), sourceFile)
+                            pagesFromDoc = extractedPaths.mapIndexed { idx, path ->
+                                PageDef(
+                                    id = UUID.randomUUID().toString(),
+                                    pageNumber = idx + 1,
+                                    type = "imported_pdf",
+                                    backgroundScanPath = path,
+                                    ocrText = "Extracted page ${idx + 1}"
+                                )
+                            }
+                        } else if (ext in listOf("jpg", "jpeg", "png", "webp")) {
+                            pagesFromDoc = listOf(
+                                PageDef(
+                                    id = UUID.randomUUID().toString(),
+                                    pageNumber = 1,
+                                    type = "scan",
+                                    backgroundScanPath = sourceFile.absolutePath,
+                                    ocrText = "Extracted Image"
+                                )
+                            )
+                        }
+                    }
+
+                    // Make independent copies of all page background and collage images
+                    for (page in pagesFromDoc) {
+                        var newBgPath = page.backgroundScanPath
+                        if (!newBgPath.isNullOrBlank()) {
+                            val bgFile = File(newBgPath)
+                            if (bgFile.exists()) {
+                                val copyFile = File(scansDir, "merged_bg_${System.currentTimeMillis()}_${UUID.randomUUID()}_${pageCounter}.jpg")
+                                try {
+                                    bgFile.copyTo(copyFile, overwrite = true)
+                                    newBgPath = copyFile.absolutePath
+                                } catch (e: Exception) {
+                                    Log.e(TAG, "Error copying background image for merge", e)
+                                }
+                            }
+                        }
+
+                        var newTopCollage = page.collageTop
+                        if (newTopCollage?.imagePath != null) {
+                            val topFile = File(newTopCollage.imagePath)
+                            if (topFile.exists()) {
+                                val copyFile = File(scansDir, "merged_top_${System.currentTimeMillis()}_${UUID.randomUUID()}.jpg")
+                                try {
+                                    topFile.copyTo(copyFile, overwrite = true)
+                                    newTopCollage = newTopCollage.copy(imagePath = copyFile.absolutePath)
+                                } catch (e: Exception) {}
+                            }
+                        }
+
+                        var newBottomCollage = page.collageBottom
+                        if (newBottomCollage?.imagePath != null) {
+                            val bottomFile = File(newBottomCollage.imagePath)
+                            if (bottomFile.exists()) {
+                                val copyFile = File(scansDir, "merged_bottom_${System.currentTimeMillis()}_${UUID.randomUUID()}.jpg")
+                                try {
+                                    bottomFile.copyTo(copyFile, overwrite = true)
+                                    newBottomCollage = newBottomCollage.copy(imagePath = copyFile.absolutePath)
+                                } catch (e: Exception) {}
+                            }
+                        }
+
                         finalPages.add(
                             page.copy(
                                 id = UUID.randomUUID().toString(),
-                                pageNumber = pageCounter++
+                                pageNumber = pageCounter++,
+                                backgroundScanPath = newBgPath,
+                                collageTop = newTopCollage,
+                                collageBottom = newBottomCollage
                             )
                         )
                     }
+                }
+
+                if (finalPages.isEmpty()) {
+                    triggerFeedback("Failed to combine documents: No valid pages found.")
+                    return@launch
                 }
 
                 val docContent = DocumentContent(pages = finalPages)
@@ -2975,19 +3179,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 if (savedDoc != null) {
                     val file = PdfGenerator.buildPdf(getApplication(), savedDoc, docContent, _uiState.value.signatures)
-                    if (file != null) {
-                        repo.updateDocument(savedDoc.copy(fileUri = file.absolutePath))
+                    val updatedDoc = if (file != null) {
+                        val docWithUri = savedDoc.copy(fileUri = file.absolutePath)
+                        repo.updateDocument(docWithUri)
+                        docWithUri
+                    } else {
+                        savedDoc
                     }
-                    triggerFeedback("Acrobat merged complete! Combined ${docs.size} files into ${finalPages.size} pages.")
-                    
-                    if (shareAfterCompile && context != null) {
+
+                    triggerFeedback("Combine complete! Merged ${docs.size} files into ${finalPages.size} pages.")
+
+                    if (shareAfterCompile && context != null && file != null) {
                         navigateTo(Screen.Dashboard)
-                        com.example.ui.screens.sharePdfFile(context, savedDoc.copy(fileUri = file?.absolutePath ?: ""))
+                        com.example.ui.screens.sharePdfFile(context, updatedDoc)
                     } else {
                         navigateTo(Screen.Dashboard)
                     }
                 }
             } catch (e: Exception) {
+                Log.e(TAG, "Error compiling merged documents", e)
                 triggerFeedback("Failed to merge: ${e.localizedMessage}")
             }
         }
@@ -3095,7 +3305,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         category = if (isImage) "Photo import" else "PDF import",
                         pageCount = initialPages.size,
                         contentJson = json,
-                        isSaved = false
+                        isSaved = true
                     )
 
                     val docId = repo.insertDocument(newDoc).toInt()
@@ -3229,7 +3439,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         category = if (isImage) "Photo import" else "PDF import",
                         pageCount = initialPages.size,
                         contentJson = json,
-                        isSaved = false
+                        isSaved = true
                     )
 
                     val docId = repo.insertDocument(newDoc).toInt()
